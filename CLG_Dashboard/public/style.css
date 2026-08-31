@@ -1,0 +1,314 @@
+:root {
+  color-scheme: light;
+  --page:        #f9f9f7;
+  --surface:     #fcfcfb;
+  --text:        #0b0b0b;
+  --text-2:      #52514e;
+  --muted:       #898781;
+  --grid:        #e1e0d9;
+  --border:      rgba(11,11,11,0.10);
+  --accent:      #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page:        #0d0d0d;
+    --surface:     #1a1a19;
+    --text:        #ffffff;
+    --text-2:      #c3c2b7;
+    --muted:       #898781;
+    --grid:        #2c2c2a;
+    --border:      rgba(255,255,255,0.10);
+    --accent:      #3987e5;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page:        #0d0d0d;
+  --surface:     #1a1a19;
+  --text:        #ffffff;
+  --text-2:      #c3c2b7;
+  --muted:       #898781;
+  --grid:        #2c2c2a;
+  --border:      rgba(255,255,255,0.10);
+  --accent:      #3987e5;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow-x: hidden;
+}
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 20px 24px 0;
+}
+.topbar h1 { font-size: 20px; margin: 0; }
+.muted { color: var(--muted); font-size: 13px; }
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 16px;
+  padding: 16px 24px;
+}
+.filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.filters input {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+.filters button {
+  font: inherit;
+  padding: 7px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+.filters button:hover { opacity: 0.9; }
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  font: inherit;
+  font-weight: 600;
+  padding: 10px 18px;
+  border: none;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 10px 24px 0;
+}
+.subtab {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.subtab:hover { color: var(--text); border-color: var(--text-2); }
+.subtab.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-width: 0; }
+
+.channel {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  background: var(--surface);
+  min-width: 0;
+}
+
+.region-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.kpi-tile {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.kpi-tile .label { font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+.kpi-tile .value {
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.funnel-chart-wrap { min-width: 0; }
+.funnel-chart-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.funnel-chart-header h3 {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0;
+  font-weight: 600;
+}
+
+.legend { display: flex; flex-wrap: wrap; gap: 12px; }
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.quarter-group { margin-bottom: 20px; }
+.quarter-group:last-child { margin-bottom: 0; }
+.quarter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.bar-row-simple { grid-template-columns: 1fr; }
+.bar-row .bar-label {
+  text-align: right;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-track {
+  height: 22px;
+  background: var(--grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  min-width: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 8px;
+}
+.bar-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.35);
+}
+
+.pivot-wrap { min-width: 0; margin-top: 28px; }
+.pivot-wrap h3 {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+.table-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 520px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.pivot-table, .sql-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+}
+.pivot-table th, .pivot-table td, .sql-table th, .sql-table td {
+  padding: 4px 5px;
+  text-align: right;
+  border-bottom: 1px solid var(--grid);
+  white-space: normal;
+  overflow-wrap: break-word;
+  font-variant-numeric: tabular-nums;
+  vertical-align: top;
+  line-height: 1.25;
+}
+/* Numeric/status columns never need more than a couple of digits -- only
+   break there as an absolute last resort, never mid-word. */
+.pivot-table td:not(.pin), .pivot-table th:not(.pin), .sql-table td:not(.pin), .sql-table th:not(.pin) {
+  word-break: keep-all;
+}
+.pivot-table thead th, .sql-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--text-2);
+  font-weight: 600;
+  font-size: 10.5px;
+  z-index: 2;
+}
+
+.pin { text-align: left; font-variant-numeric: normal; vertical-align: middle; color: var(--text-2); }
+.pin-quarter, .pin-subsource, .pin-metric {
+  position: sticky;
+  background: var(--surface);
+  z-index: 1;
+}
+.pin-quarter { left: 0; width: 88px; font-weight: 600; color: var(--text); word-break: normal; }
+.pin-subsource { left: 88px; width: 64px; word-break: normal; }
+.pin-metric { left: 152px; width: 62px; border-right: 1px solid var(--border); font-size: 10px; }
+.pivot-table thead .pin, .sql-table thead .pin { z-index: 3; }
+
+.pivot-cell-count { color: var(--text); font-weight: 600; }
+
+.pivot-total-col { border-left: 1px solid var(--border); background: var(--grid); }
+.pivot-total-row td { background: var(--grid); font-weight: 600; color: var(--text); }
+
+/* SQL's Opportunity Source / Sub Source values run longer than the other
+   stages' quarter/status labels, so its pinned columns get more room. */
+.sql-table .pin-quarter { width: 76px; }
+.sql-table .pin-subsource { left: 76px; width: 108px; }
+.sql-table .pin-metric { left: 184px; width: 108px; font-size: 10.5px; }
+
+.empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+
+.fixed-range-note:not(:empty) {
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--grid);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 16px;
+}

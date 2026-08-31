@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ecomm Dashboard</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Ecomm Dashboard</h1>
+    <span id="lastUpdated" class="muted"></span>
+  </header>
+
+  <form id="filters" class="filters">
+    <label>Start
+      <input type="date" id="startDate" value="2026-04-01">
+    </label>
+    <label>End
+      <input type="date" id="endDate">
+    </label>
+    <button type="submit">Apply</button>
+    <span id="status" class="muted"></span>
+  </form>
+
+  <nav class="tabs" id="regionTabs">
+    <button type="button" class="tab active" data-region="India">India</button>
+    <button type="button" class="tab" data-region="SEA">SEA</button>
+    <button type="button" class="tab" data-region="EU">EU</button>
+  </nav>
+
+  <nav class="subtabs" id="stageTabs">
+    <button type="button" class="subtab active" data-stage="lead">Leads</button>
+    <button type="button" class="subtab" data-stage="iql">IQL</button>
+    <button type="button" class="subtab" data-stage="mql">MQL</button>
+    <button type="button" class="subtab" data-stage="sql">SQL</button>
+  </nav>
+
+  <main id="app"></main>
+
+  <template id="region-template">
+    <section class="channel">
+      <div class="kpi-row region-kpi-row">
+        <div class="kpi-tile">
+          <div class="label">Total Records</div>
+          <div class="value stat-total-records"></div>
+        </div>
+        <div class="kpi-tile">
+          <div class="label">Total Lead Age</div>
+          <div class="value stat-lead-age"></div>
+        </div>
+        <div class="kpi-tile">
+          <div class="label">Total NDL</div>
+          <div class="value stat-ndl"></div>
+        </div>
+      </div>
+
+      <div class="funnel-chart-wrap">
+        <div class="funnel-chart-header">
+          <h3 class="chart-title"></h3>
+          <div class="legend"></div>
+        </div>
+        <div class="funnel-chart"></div>
+      </div>
+
+      <div class="pivot-wrap">
+        <h3 class="pivot-title"></h3>
+        <div class="table-scroll">
+          <table class="pivot-table">
+            <thead></thead>
+            <tbody></tbody>
+            <tfoot></tfoot>
+          </table>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <template id="sql-region-template">
+    <section class="channel">
+      <div class="fixed-range-note"></div>
+      <div class="kpi-row region-kpi-row sql-kpi-row"></div>
+
+      <div class="funnel-chart-wrap">
+        <div class="funnel-chart-header">
+          <h3>Opportunity Source &gt; Opportunity Sub Source</h3>
+          <div class="legend"></div>
+        </div>
+        <div class="funnel-chart"></div>
+      </div>
+
+      <div class="pivot-wrap">
+        <h3>SQL Change Date &gt; Opportunity Source &gt; Opportunity Sub Source</h3>
+        <div class="table-scroll">
+          <table class="sql-table">
+            <thead></thead>
+            <tbody></tbody>
+            <tfoot></tfoot>
+          </table>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

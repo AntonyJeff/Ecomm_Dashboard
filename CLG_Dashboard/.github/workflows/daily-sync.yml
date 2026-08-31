@@ -1,0 +1,33 @@
+name: CLG Daily Salesforce Sync
+
+on:
+  schedule:
+    - cron: '30 21 * * *'  # 3:00 AM IST
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r CLG_Dashboard/sync/requirements.txt
+
+      - name: Run sync
+        env:
+          CLG_SHEET_ID: ${{ secrets.CLG_SHEET_ID }}
+          CLG_LEADS_SHEET_NAME: Leads
+          CLG_OPPORTUNITY_SHEET_NAME: Opportunity
+          GOOGLE_CLIENT_EMAIL: ${{ secrets.GOOGLE_CLIENT_EMAIL }}
+          GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
+          SF_CONSUMER_KEY: ${{ secrets.SF_CONSUMER_KEY }}
+          SF_CONSUMER_SECRET: ${{ secrets.SF_CONSUMER_SECRET }}
+          SF_USERNAME: ${{ secrets.SF_USERNAME }}
+          SF_PASSWORD: ${{ secrets.SF_PASSWORD }}
+          SF_SECURITY_TOKEN: ${{ secrets.SF_SECURITY_TOKEN }}
+        run: python CLG_Dashboard/sync/daily_sync.py
