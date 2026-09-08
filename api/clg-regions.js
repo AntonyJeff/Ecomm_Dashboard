@@ -25,6 +25,13 @@ const METRICS_MQL = [
   { key: 'ndl', label: 'Sum NDL', bold: false },
   { key: 'count', label: 'Count', bold: true },
 ];
+// The Leads tab's own Lead Status crosstab (added per user request, on top of
+// the original report) drops Lead Age entirely -- only this stage's KPI tiles
+// and table use this metric set; IQL/MQL keep Lead Age untouched.
+const METRICS_LEAD_STATUS = [
+  { key: 'ndl', label: 'Sum of NDL', bold: false },
+  { key: 'count', label: 'Record Count', bold: true },
+];
 
 // Defaults, keyed by stage. Each region's ACTUAL report can (and does) differ
 // from these -- e.g. SEA's IQL groups by Owner Team where India's groups by
@@ -36,7 +43,19 @@ const STAGE_DEFAULTS = {
   lead: {
     label: 'Leads', rowField: 'Sub_Lead_Source_Category__c', rowFieldLabel: 'Sub Lead Source',
     chartMode: 'breakdown', dateField: 'CreatedDate', dateFieldLabel: 'Create Date',
-    outerField: 'quarter', metrics: METRICS_FULL,
+    outerField: 'quarter', metrics: METRICS_LEAD_STATUS,
+    // Tags the funnel-equivalent Lead Status columns with their stage name --
+    // user asked for this specifically on the Leads tab (which now doubles as
+    // an at-a-glance funnel view) so "Meeting booked" etc. read unambiguously
+    // as the IQL/MQL/SQL milestones, without relabeling those same statuses
+    // wherever they appear inside the IQL/MQL tabs' own tables.
+    funnelStatusTags: { 'Meeting booked': 'IQL', 'Meeting Executed': 'MQL', 'Converted': 'SQL' },
+    // A blank Sub Lead Source means the lead came in without any sub-source
+    // tagging at all -- i.e. straight inbound, not attributable to a specific
+    // channel. Only the Leads tab's rowField (Sub Lead Source) gets this
+    // label; IQL/MQL's blank row-dimension values (LeadSource/Owner Team)
+    // still fall back to the generic '-'.
+    blankRowDimLabel: 'Inbound Leads',
   },
   iql: {
     label: 'IQL', rowField: 'LeadSource', rowFieldLabel: 'Lead Source',
@@ -157,6 +176,11 @@ const STATUS_DEFS = [
   ['Event attendee Open', 'Event attendee Open'],
   ['Event attendee Closed', 'Event attendee Closed'],
   ['Open - Not Contacted', 'Open - Not Contacted'],
+  // SEA's org data uses this value with no hyphen -- a genuinely distinct
+  // literal string from 'Open - Not Contacted' above, kept as its own column
+  // rather than merged/normalized (verified live: India/EU use the hyphenated
+  // form, SEA does not).
+  ['Open Not Contacted', 'Open Not Contacted'],
   ['Attempting Contact', 'Attempting Contact'],
   ['Engaged Lead', 'Engaged Lead'],
   ['Meeting booked', 'Meeting booked'],
@@ -231,7 +255,7 @@ function buildStage(rows, startTS, endTS, stageCfg) {
     totalLeadAge += leadAge;
     if (isNdl) totalNDL += 1;
 
-    const rowDimValue = (row[cols.rowDim] || '').toString().trim() || '-';
+    const rowDimValue = (row[cols.rowDim] || '').toString().trim() || (stageCfg.blankRowDimLabel || '-');
     const quarter = fyQuarterLabel(ts);
     if (!byQuarterRowDim.has(quarter)) byQuarterRowDim.set(quarter, new Map());
     const qMap = byQuarterRowDim.get(quarter);
@@ -278,9 +302,14 @@ function buildStage(rows, startTS, endTS, stageCfg) {
     };
   });
 
+  const tags = stageCfg.funnelStatusTags || {};
   const statusColumns = [...statusesSeen]
     .sort((a, b) => (STATUS_RANK.get(a) ?? 99) - (STATUS_RANK.get(b) ?? 99))
-    .map(value => ({ value, label: STATUS_LABEL.get(value) || value }));
+    .map(value => {
+      const baseLabel = STATUS_LABEL.get(value) || value;
+      const tag = tags[value];
+      return { value, label: tag ? `${baseLabel} (${tag})` : baseLabel };
+    });
 
   // Row hierarchy: Leads/IQL/SQL nest rowDim inside Quarter (Quarter is the
   // merged/rowspan-ed outer column); MQL reverses this -- Quarter nests inside

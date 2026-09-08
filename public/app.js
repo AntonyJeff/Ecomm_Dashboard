@@ -123,8 +123,19 @@ function renderRegion(region, stage, data) {
   const node = template.content.cloneNode(true);
 
   node.querySelector('.stat-total-records').textContent = fmtInt(data.totalRecords);
-  node.querySelector('.stat-lead-age').textContent = fmtInt(data.totalLeadAge);
   node.querySelector('.stat-ndl').textContent = fmtInt(data.totalNDL);
+
+  // The Leads tab swaps its middle KPI tile for Records+NDL combined (no Lead
+  // Age anywhere on this tab); IQL/MQL keep the original Total Lead Age tile.
+  const middleLabel = node.querySelector('.stat-middle-label');
+  const middleValue = node.querySelector('.stat-middle-value');
+  if (stage === 'lead') {
+    middleLabel.textContent = 'Total Records + NDL';
+    middleValue.textContent = fmtInt(data.totalRecords + data.totalNDL);
+  } else {
+    middleLabel.textContent = 'Total Lead Age';
+    middleValue.textContent = fmtInt(data.totalLeadAge);
+  }
 
   // The top chart always groups by date only (even in 'simple' mode it's one
   // bar per quarter) -- its title uses the stage's date-axis label alone, not
