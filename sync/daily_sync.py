@@ -118,13 +118,31 @@ EU_LEAD_SOURCE_VALUES = [
 # standard `Country` field -- this org has SEVEN fields with "country" in the
 # name/label. Confirmed by matching the India report's total (173) and its
 # exact Sub_Lead_Source_Category__c breakdown record-for-record.
+# Standardized Leads filter (given directly by the user, superseding the
+# old per-report-screenshot mirroring for this stage): one shared template --
+# LeadSource IN (...) OR Attendee_Source__c = 'ABM' -- AND [region] AND
+# (Main_Industry_Vertical__c contains... OR Industry contains...) -- with a
+# Source__c-not-contains-'dimi' exclusion for India/SEA only. Region is the
+# ONLY thing that varies between India/SEA; EU drops the Country filter (no
+# single country works for "Europe") and the Source exclusion entirely, and
+# swaps in Owner_Sub_Team__c LIKE '%europe%' instead -- both changes given
+# explicitly by the user, verified live (India 189, SEA 11, EU 32 for
+# Apr 1 - Sep 9 2026).
+STANDARD_LEAD_SOURCE_VALUES = [
+    'ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia',
+    'Insent/ChatBot', 'Intercom', 'Factors Engaged', 'Influ 2 Engaged',
+]
+STANDARD_LEAD_SOURCE_CLAUSE = (
+    f"(LeadSource IN {soql_in(STANDARD_LEAD_SOURCE_VALUES)} "
+    f"OR Attendee_Source__c = 'ABM')"
+)
+
 REGION_LEAD_FILTERS = {
     'India': {
         'sheet': 'india_ecomm_lead',
         # (1 OR 5) AND 2 AND (3 OR 4) AND 6
         'where': lambda: (
-            f"(LeadSource IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Insent', 'Intercom', 'Factors Engaged', 'Influ 2 Engaged'])} "
-            f"OR Attendee_Source__c = 'ABM') "
+            f"{STANDARD_LEAD_SOURCE_CLAUSE} "
             f"AND Country_Picklist__c = 'India' "
             f"AND {VERTICAL_CLAUSE} "
             f"AND {soql_not_contains_all('Source__c', ['dimi'])}"
@@ -132,118 +150,128 @@ REGION_LEAD_FILTERS = {
     },
     'SEA': {
         'sheet': 'sea_ecomm_lead',
-        # (1 OR 5) AND 2 AND (3 OR 4) AND 6
+        # (1 OR 5) AND 2 AND (3 OR 4) AND 6 -- identical to India except Country
         'where': lambda: (
-            f"(LeadSource IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Insent', 'Intercom', 'Digital', 'Factors Engaged', 'Influ 2 Engaged'])} "
-            f"OR Attendee_Source__c = 'ABM') "
+            f"{STANDARD_LEAD_SOURCE_CLAUSE} "
             f"AND Country_Picklist__c IN {soql_in(['Indonesia', 'Malaysia', 'Philippines', 'Singapore'])} "
             f"AND {VERTICAL_CLAUSE} "
-            f"AND {soql_not_contains_all('Source__c', ['dimi', 'other'])}"
+            f"AND {soql_not_contains_all('Source__c', ['dimi'])}"
         ),
     },
     'EU': {
         'sheet': 'eu_ecomm_lead',
-        # (1 OR 4) AND (2 OR 3) AND 5 -- no Country filter; Owner_Sub_Team__c
-        # stands in for region here, and blank LeadSource ("") is included.
+        # (1 OR 4) AND (2 OR 3) AND 5 -- no Country filter and no Source
+        # exclusion; Owner_Sub_Team__c stands in for region.
         'where': lambda: (
-            f"(LeadSource IN {soql_in(EU_LEAD_SOURCE_VALUES)} "
-            f"OR LeadSource = null "
-            f"OR Attendee_Source__c = 'ABM') "
+            f"{STANDARD_LEAD_SOURCE_CLAUSE} "
             f"AND {VERTICAL_CLAUSE} "
             f"AND Owner_Sub_Team__c LIKE '%europe%'"
         ),
     },
 }
 
-# -- IQL funnel filters, one per region. Rolling out region by region as each
-# is confirmed against its report -- only India is wired up so far.
-# Date field is Meeting_Booked_Date__c (not CreatedDate) -- confirmed against
-# the report's "Meeting Booked Date" axis label and matches the IQL date-field
-# mapping already verified earlier (100% field-population match).
+# -- IQL funnel filters, one per region -- standardized template (given
+# directly by the user), same shared-clause pattern as REGION_LEAD_FILTERS.
+# Note this stage's LeadSource list has NO 'ABM Safal Imperia' (unlike the
+# Leads stage's list) and vertical is Main_Industry_Vertical__c ONLY (no
+# Industry OR-condition). Date field is Meeting_Booked_Date__c, matching the
+# report's "Meeting Booked Date" axis label.
+IQL_LEAD_SOURCE_VALUES = [
+    'ABM', 'Growth Marketing', 'Inbound Lead', 'Insent/ChatBot',
+    'Intercom', 'Factors Engaged', 'Influ 2 Engaged',
+]
+IQL_LEAD_SOURCE_CLAUSE = (
+    f"(LeadSource IN {soql_in(IQL_LEAD_SOURCE_VALUES)} "
+    f"OR Attendee_Source__c = 'ABM')"
+)
+IQL_VERTICAL_CLAUSE = f"({soql_contains_terms('Main_Industry_Vertical__c', VERTICAL_MAIN_VALUES)})"
+
 IQL_LEAD_FILTERS = {
     'India': {
         'sheet': 'india_ecomm_iql',
         'dateField': 'Meeting_Booked_Date__c',
-        # (1 OR 4) AND 2 AND 3 AND 5 -- only Main_Industry_Vertical__c this
-        # time (no Industry OR-condition), and 5 Source exclusion terms.
+        # (1 OR 4) AND 2 AND 3 AND 5 -- verified live: total 56 (Apr 1 - Sep 9 2026).
         'where': lambda: (
-            f"(LeadSource IN {soql_in(EU_LEAD_SOURCE_VALUES)} "
-            f"OR LeadSource = null "
-            f"OR Attendee_Source__c = 'ABM') "
+            f"{IQL_LEAD_SOURCE_CLAUSE} "
             f"AND Country_Picklist__c = 'India' "
-            f"AND ({soql_contains_terms('Main_Industry_Vertical__c', VERTICAL_MAIN_VALUES)}) "
+            f"AND {IQL_VERTICAL_CLAUSE} "
             f"AND {soql_not_contains_all('Source__c', ['dimi', 'other', 'bank', 'bfsi', 'fintech'])}"
         ),
     },
     'SEA': {
         'sheet': 'sea_ecomm_iql',
         'dateField': 'Meeting_Booked_Date__c',
-        # (1 OR 4) AND 2 AND 3 AND 5
+        # (1 OR 4) AND 2 AND 3 AND 5 -- identical to India except Country.
+        # Verified live: total 3 (Apr 1 - Sep 9 2026).
         'where': lambda: (
-            f"(LeadSource IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'Insent', 'Intercom', 'Factors Engaged'])} "
-            f"OR Attendee_Source__c = 'ABM') "
+            f"{IQL_LEAD_SOURCE_CLAUSE} "
             f"AND Country_Picklist__c IN {soql_in(['Indonesia', 'Malaysia', 'Philippines', 'Singapore'])} "
-            f"AND ({soql_contains_terms('Main_Industry_Vertical__c', VERTICAL_MAIN_VALUES)}) "
+            f"AND {IQL_VERTICAL_CLAUSE} "
             f"AND {soql_not_contains_all('Source__c', ['dimi', 'other', 'bank', 'bfsi', 'fintech'])}"
         ),
     },
     'EU': {
         'sheet': 'eu_ecomm_iql',
         'dateField': 'Meeting_Booked_Date__c',
-        # (1 OR 3) AND 2 AND 4 -- no Country filter; Owner_Sub_Team__c stands
-        # in for region, blank LeadSource included. Verified live: total 55
-        # (41 Q1 FY2026 + 14 Q2 FY2026) matches the report exactly.
+        # (1 OR 3) AND 2 AND 4 -- no Country filter and no Source exclusion;
+        # Owner_Sub_Team__c stands in for region. Verified live: total 8
+        # (Apr 1 - Sep 9 2026).
         'where': lambda: (
-            f"(LeadSource IN {soql_in(EU_LEAD_SOURCE_VALUES)} "
-            f"OR LeadSource = null "
-            f"OR Attendee_Source__c = 'ABM') "
-            f"AND ({soql_contains_terms('Main_Industry_Vertical__c', VERTICAL_MAIN_VALUES)}) "
+            f"{IQL_LEAD_SOURCE_CLAUSE} "
+            f"AND {IQL_VERTICAL_CLAUSE} "
             f"AND Owner_Sub_Team__c LIKE '%europe%'"
         ),
     },
 }
 
-# -- MQL funnel filters, one per region. NOTE: the "India" filter given uses
-# Country_Picklist__c IN (Indonesia, Malaysia, Philippines, Singapore) -- the
-# SEA country list, not India -- built exactly as given per instruction;
-# flagged for the user to confirm/correct later.
-# Date field is Meeting_Executed_Date__c, matching the report's axis label.
+# -- MQL funnel filters, one per region -- standardized template (given
+# directly by the user). This stage's LeadSource list DOES include 'ABM
+# Safal Imperia' (like Leads, unlike IQL), and its Source exclusion is only
+# 3 terms (other/dimi/bfsi, no bank/fintech). Date field is
+# Meeting_Executed_Date__c, matching the report's axis label.
+MQL_LEAD_SOURCE_VALUES = [
+    'ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia',
+    'Insent/ChatBot', 'Intercom', 'Factors Engaged', 'Influ 2 Engaged',
+]
+MQL_LEAD_SOURCE_CLAUSE = (
+    f"(LeadSource IN {soql_in(MQL_LEAD_SOURCE_VALUES)} "
+    f"OR Attendee_Source__c = 'ABM')"
+)
+MQL_VERTICAL_CLAUSE = f"({soql_contains_terms('Main_Industry_Vertical__c', VERTICAL_MAIN_VALUES)})"
+
 MQL_LEAD_FILTERS = {
     'India': {
         'sheet': 'india_ecomm_mql',
         'dateField': 'Meeting_Executed_Date__c',
-        # (1 OR 4) AND 2 AND 3 AND 5
+        # (1 OR 4) AND 2 AND 3 AND 5 -- verified live: total 44 (Apr 1 - Sep 9 2026).
         'where': lambda: (
-            f"(LeadSource IN {soql_in(EU_LEAD_SOURCE_VALUES)} "
-            f"OR LeadSource = null "
-            f"OR Attendee_Source__c = 'ABM') "
-            f"AND Country_Picklist__c IN {soql_in(['Indonesia', 'Malaysia', 'Philippines', 'Singapore'])} "
-            f"AND ({soql_contains_terms('Main_Industry_Vertical__c', VERTICAL_MAIN_VALUES)}) "
+            f"{MQL_LEAD_SOURCE_CLAUSE} "
+            f"AND Country_Picklist__c = 'India' "
+            f"AND {MQL_VERTICAL_CLAUSE} "
             f"AND {soql_not_contains_all('Source__c', ['other', 'dimi', 'bfsi'])}"
         ),
     },
     'SEA': {
         'sheet': 'sea_ecomm_mql',
         'dateField': 'Meeting_Executed_Date__c',
-        # (1 OR 4) AND 2 AND 3 AND 5
+        # (1 OR 4) AND 2 AND 3 AND 5 -- identical to India except Country.
+        # Verified live: total 3 (Apr 1 - Sep 9 2026).
         'where': lambda: (
-            f"(LeadSource IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Insent', 'Intercom'])} "
-            f"OR Attendee_Source__c = 'ABM') "
+            f"{MQL_LEAD_SOURCE_CLAUSE} "
             f"AND Country_Picklist__c IN {soql_in(['Indonesia', 'Malaysia', 'Philippines', 'Singapore'])} "
-            f"AND ({soql_contains_terms('Main_Industry_Vertical__c', VERTICAL_MAIN_VALUES)}) "
-            f"AND {soql_not_contains_all('Source__c', ['dimi', 'other', 'bank', 'bfsi', 'fintech'])}"
+            f"AND {MQL_VERTICAL_CLAUSE} "
+            f"AND {soql_not_contains_all('Source__c', ['other', 'dimi', 'bfsi'])}"
         ),
     },
     'EU': {
         'sheet': 'eu_ecomm_mql',
         'dateField': 'Meeting_Executed_Date__c',
-        # (1 OR 3) AND 2 AND 4 -- same filter shape as EU IQL, just on
-        # Meeting Executed Date. Verified live: total 45 matches the report.
+        # (1 OR 3) AND 2 AND 4 -- no Country filter and no Source exclusion;
+        # Owner_Sub_Team__c stands in for region. Verified live: total 5
+        # (Apr 1 - Sep 9 2026).
         'where': lambda: (
-            f"(LeadSource IN {soql_in(EU_LEAD_SOURCE_VALUES)} "
-            f"OR LeadSource = null "
-            f"OR Attendee_Source__c = 'ABM') "
-            f"AND ({soql_contains_terms('Main_Industry_Vertical__c', VERTICAL_MAIN_VALUES)}) "
+            f"{MQL_LEAD_SOURCE_CLAUSE} "
+            f"AND {MQL_VERTICAL_CLAUSE} "
             f"AND Owner_Sub_Team__c LIKE '%europe%'"
         ),
     },
@@ -259,9 +287,12 @@ MQL_LEAD_FILTERS = {
 SQL_OPPORTUNITY_FILTERS = {
     'India': {
         'sheet': 'india_ecomm_sql',
-        # 1 AND 2 AND 3 AND 4 AND 5 AND (6 OR 7) AND 8
+        # 1 AND 2 AND 3 AND 4 AND 5 AND (6 OR 7) AND 8 -- "Current FY
+        # (01-Apr-2026 - 31-Mar-2027)"; no fixed dateRange needed since the
+        # default dynamic FY-to-date window (Apr 1 - yesterday) already
+        # produces an identical count (25) -- no data exists past today anyway.
         'where': lambda: (
-            f"Opportunity.Opportunity_Source__c IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Intercom', 'Insent', 'Factors Engaged', 'Influ 2 Engaged'])} "
+            f"Opportunity.Opportunity_Source__c IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Intercom', 'Insent/ChatBot', 'Factors Engaged', 'Influ 2 Engaged'])} "
             f"AND (NOT Opportunity.Owner_Team__c LIKE '%Executive%') "
             f"AND Opportunity.Owner.Name != 'CRM Administrator' "
             f"AND Opportunity.Type NOT IN {soql_in(['Refill with Approval', 'Refill without Approval', 'Renewal Without Approval', 'Renewal with Approval'])} "
@@ -271,19 +302,18 @@ SQL_OPPORTUNITY_FILTERS = {
             f"AND {soql_not_contains_all('Opportunity.Account.Website_Category__c', ['other', 'dimi', 'bfsi'])}"
         ),
     },
-    # SEA's report filters on "SQL Change Date: Current FY" -- same dynamic
-    # fiscal-year-to-date window as India's SQL report, not a fixed prior-year
-    # window (corrected after the user confirmed the report's actual filter
-    # text: "Current FY (01-Apr-2026 - 31-Mar-2027)").
+    # SEA's report filters on "SQL Change Date: Previous FY (01-Apr-2025 -
+    # 31-Mar-2026)" -- a genuinely FIXED prior-year window, same shape as EU's.
     'SEA': {
         'sheet': 'sea_ecomm_sql',
+        'dateRange': ('2025-04-01', '2026-03-31'),
         # 1 AND 2 AND (4 OR 3) AND 5 -- note: no Owner Team / Owner filters
         # here at all, unlike India's SQL filter; Country Name is
         # Account.Country_Picklist__c (same field API name as Lead's, but on
         # Account); Opportunity Type is an inclusion list here (incl. blank),
         # not an exclusion list like India's.
         'where': lambda: (
-            f"Opportunity.Opportunity_Source__c IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Intercom', 'Insent', 'Digital', 'Factors Engaged', 'Influ 2 Engaged'])} "
+            f"Opportunity.Opportunity_Source__c IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Intercom', 'Insent/ChatBot', 'Digital', 'Factors Engaged', 'Influ 2 Engaged'])} "
             f"AND Opportunity.Account.Country_Picklist__c IN {soql_in(['Indonesia', 'Malaysia', 'Philippines', 'Singapore'])} "
             f"AND (Opportunity.Account.ABM_Industry_Vertical__c IN {soql_in(['E-Comm/D2C', 'Retail', 'QSR'])} "
             f"OR ({soql_contains_terms('Opportunity.Account.Website_Category__c', ['e-comm', 'ecomm', 'retail', 'd2c'])})) "
@@ -292,17 +322,15 @@ SQL_OPPORTUNITY_FILTERS = {
         ),
     },
     # EU's report filters on "SQL Change Date: Previous FY (01-Apr-2025 -
-    # 31-Mar-2026)" -- a genuinely FIXED window, unlike India/SEA's dynamic
-    # Current FY. Verified live: 0 matching opportunities in that window
-    # (23 match the source/team/vertical filters outside the date window,
-    # confirming the filter logic itself is sound, just currently empty).
+    # 31-Mar-2026)" -- a genuinely FIXED window, unlike India's dynamic
+    # Current FY. Verified live: 0 matching opportunities in that window.
     'EU': {
         'sheet': 'eu_ecomm_sql',
         'dateRange': ('2025-04-01', '2026-03-31'),
         # 1 AND 3 AND (4 OR 2) -- no Owner Team / Owner Name / Type filters,
         # unlike India's SQL filter.
         'where': lambda: (
-            f"Opportunity.Opportunity_Source__c IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Intercom', 'Insent', 'Factors Engaged', 'Influ 2 Engaged'])} "
+            f"Opportunity.Opportunity_Source__c IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Intercom', 'Insent/ChatBot', 'Factors Engaged', 'Influ 2 Engaged'])} "
             f"AND Opportunity.Owner_Sub_Team__c LIKE '%europe%' "
             f"AND (Opportunity.Account.ABM_Industry_Vertical__c IN {soql_in(['E-Comm/D2C', 'Lifestyle', 'Retail', 'Conglomerate', 'QSR'])} "
             f"OR ({soql_contains_terms('Opportunity.Account.Website_Category__c', ['e-comm', 'ecomm', 'retail', 'd2c'])}))"
@@ -475,7 +503,7 @@ def sync_stage_for_region(token, instance_url, gc, stage_label, region, cfg):
     range_end = END_DATE if is_datetime else DATE_LABEL_ONLY
     print(f"\n[{stage_label}:{region}] Fetching {range_start} -> {range_end} (by {date_field})...")
     query = f"""
-    SELECT Id, CreatedDate, Status, Country, Country_Picklist__c, Marketing_Region__c,
+    SELECT Id, Name, Company, Title, CreatedDate, Status, Country, Country_Picklist__c, Marketing_Region__c,
            LeadSource, Source__c, Utm_Source__c, Utm_Campaign__c,
            Lead_Qualification_Indicator__c,
            MQL_Date__c, SQL_Date__c, Meeting_Executed_Date__c,
@@ -496,6 +524,9 @@ def sync_stage_for_region(token, instance_url, gc, stage_label, region, cfg):
 
     rows = [{
         'Id':                              r.get('Id', ''),
+        'Name':                            r.get('Name', ''),
+        'Company':                         r.get('Company', ''),
+        'Title':                           r.get('Title', ''),
         'CreatedDate':                     fmt_date(r.get('CreatedDate', '')),
         'Status':                          r.get('Status', ''),
         'Country':                         r.get('Country', ''),
@@ -562,6 +593,25 @@ def sync_sql_for_region(token, instance_url, gc, region):
             r = r.get(p)
         return r
 
+    # The Leads tab's "MRR" column (added per user request) attributes each
+    # SQL opportunity's MRR back to the Sub Lead Source / Create Date quarter
+    # of the LEAD it converted from -- Opportunity has no such field itself,
+    # so this traces back via the standard Lead.ConvertedOpportunityId link.
+    # Verified live: 10/10 of India's current SQL opportunities trace back to
+    # a lead successfully, though only ~40% of those leads have a populated
+    # Sub_Lead_Source_Category__c -- the rest fall into the same "Inbound
+    # Leads" blank-value bucket the Leads tab already uses elsewhere.
+    opp_ids = sorted({r.get('OpportunityId') for r in records if r.get('OpportunityId')})
+    lead_by_opp_id = {}
+    for i in range(0, len(opp_ids), 200):
+        batch = opp_ids[i:i + 200]
+        lead_query = (
+            f"SELECT ConvertedOpportunityId, Sub_Lead_Source_Category__c, CreatedDate, LeadSource "
+            f"FROM Lead WHERE ConvertedOpportunityId IN {soql_in(batch)}"
+        )
+        for lead in soql_fetch(token, instance_url, lead_query):
+            lead_by_opp_id[lead['ConvertedOpportunityId']] = lead
+
     rows = [{
         'Id':                              r.get('Id', ''),
         'OpportunityId':                   r.get('OpportunityId', ''),
@@ -584,6 +634,9 @@ def sync_sql_for_region(token, instance_url, gc, region):
         'Product_Amount_ARR__c':           r.get('arrConverted', 0) or 0,
         'Factors_Engagement_Score__c':     get_nested(r, 'Opportunity', 'Account', 'Factors_Engagement_Score__c') or 0,
         'Factors_SDR_Tracker__c':          get_nested(r, 'Opportunity', 'Account', 'Factors_SDR_Tracker__c') or False,
+        'Lead_Sub_Lead_Source_Category__c': (lead_by_opp_id.get(r.get('OpportunityId'), {}) or {}).get('Sub_Lead_Source_Category__c') or '',
+        'Lead_CreatedDate':                fmt_date((lead_by_opp_id.get(r.get('OpportunityId'), {}) or {}).get('CreatedDate')),
+        'Lead_LeadSource':                 (lead_by_opp_id.get(r.get('OpportunityId'), {}) or {}).get('LeadSource') or '',
     } for r in records]
 
     clear_and_write_sheet(gc, SHEET_ID, cfg['sheet'], pd.DataFrame(rows))

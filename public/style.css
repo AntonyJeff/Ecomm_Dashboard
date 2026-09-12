@@ -1,40 +1,39 @@
-:root {
-  color-scheme: light;
-  --page:        #f9f9f7;
-  --surface:     #fcfcfb;
-  --text:        #0b0b0b;
-  --text-2:      #52514e;
-  --muted:       #898781;
-  --grid:        #e1e0d9;
-  --border:      rgba(11,11,11,0.10);
-  --accent:      #2a78d6;
-}
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) {
-    color-scheme: dark;
-    --page:        #0d0d0d;
-    --surface:     #1a1a19;
-    --text:        #ffffff;
-    --text-2:      #c3c2b7;
-    --muted:       #898781;
-    --grid:        #2c2c2a;
-    --border:      rgba(255,255,255,0.10);
-    --accent:      #3987e5;
-  }
-}
+/* Two explicit themes, switched only by the top-bar toggle (data-theme on
+   <html>) -- deliberately NOT tied to the OS/browser preference, so the
+   dashboard doesn't silently flip under a viewer whose system is set to
+   light/dark. Dark (default) matches the original "Hot Account Monitor"
+   reference; Light is Netcore's own orange + white brand palette. */
+:root,
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --page:        #0d0d0d;
-  --surface:     #1a1a19;
-  --text:        #ffffff;
-  --text-2:      #c3c2b7;
-  --muted:       #898781;
-  --grid:        #2c2c2a;
-  --border:      rgba(255,255,255,0.10);
-  --accent:      #3987e5;
+  --page:        #0a0c16;
+  --surface:     #0f1221;
+  --text:        #e2e8f0;
+  --text-2:      #94a3b8;
+  --muted:       #4a5568;
+  --grid:        #1a1f35;
+  --border:      #1a1f35;
+  --accent:      #6c5ce7;
+  --accent-2:    #a29bfe;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --page:        #ffffff;
+  /* Deeper orange tint than the first pass -- cards need to read as visibly
+     orange against the white page, not near-white-on-white (per user
+     feedback: "a bit of a darker orange... more vibrant, more visible"). */
+  --surface:     #ffe6c2;
+  --text:        #211307;
+  --text-2:      #8a6a48;
+  --muted:       #a97a3e;
+  --grid:        #ffc98a;
+  --border:      #ffc27a;
+  --accent:      #ff6a00;
+  --accent-2:    #ffb347;
 }
 
 * { box-sizing: border-box; }
+.hidden { display: none !important; }
 
 body {
   margin: 0;
@@ -46,65 +45,314 @@ body {
 
 .topbar {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
   padding: 20px 24px 0;
 }
+.topbar-title { display: flex; align-items: baseline; gap: 12px; }
 .topbar h1 { font-size: 20px; margin: 0; }
 .muted { color: var(--muted); font-size: 13px; }
 
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 16px;
-  padding: 16px 24px;
+.topbar-actions { display: flex; align-items: center; gap: 12px; }
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
-.filters label {
+.theme-toggle:hover { color: var(--text); border-color: var(--accent); }
+.theme-toggle-icon { font-size: 14px; line-height: 1; }
+
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+}
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #1baf7a;
+  box-shadow: 0 0 0 0 rgba(27, 175, 122, 0.6);
+  animation: live-pulse 2s infinite;
+}
+@keyframes live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(27, 175, 122, 0.55); }
+  70%  { box-shadow: 0 0 0 6px rgba(27, 175, 122, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(27, 175, 122, 0); }
+}
+
+.secondary-row {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  padding: 20px 24px 0;
+}
+/* Calendar + region filter cards use a fixed dark indigo palette (matching
+   the approved reference design) rather than the page's light/dark theme
+   tokens -- this widget is meant to look the same regardless of theme. */
+.calendar-card {
+  flex: 2 1 520px;
+  border: 1px solid #1a1f35;
+  border-radius: 16px;
+  background: #0f1221;
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-2);
+  gap: 12px;
+  animation: fadeIn 0.5s ease-out both;
+  animation-delay: 80ms;
 }
-.filters input {
-  font: inherit;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-}
-.filters button {
-  font: inherit;
-  padding: 7px 16px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-}
-.filters button:hover { opacity: 0.9; }
 
-.tabs {
+.calendar-card-header {
   display: flex;
-  gap: 4px;
-  padding: 0 24px;
-  border-bottom: 1px solid var(--border);
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  animation: slideDown 0.4s ease-out both;
+  animation-delay: 120ms;
 }
-.tab {
-  font: inherit;
+.calendar-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.calendar-month-label {
+  font-size: 12px;
   font-weight: 600;
-  padding: 10px 18px;
-  border: none;
-  background: none;
-  color: var(--text-2);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4a5568;
 }
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.calendar-nav-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  border: 1px solid #1a1f35;
+  border-radius: 6px;
+  background: transparent;
+  color: #4a5568;
+  cursor: pointer;
+}
+.calendar-nav-btn:hover { color: #cbd5e1; border-color: #334155; }
+.calendar-range-pill {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #1a1f35;
+  color: #a29bfe;
+  animation: fadeIn 0.3s ease-out both;
+}
+
+.calendar-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.date-range-value {
+  font-size: 12px;
+  color: #6c5ce7;
+  animation: fadeIn 0.3s ease-out both;
+}
+.date-range-btn {
+  font: inherit;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #1a1f35;
+  border-radius: 8px;
+  background: #141729;
+  color: #4a5568;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.date-range-btn.active {
+  background: #2d2252;
+  border-color: #6c5ce7;
+  color: #a29bfe;
+}
+.calendar-reset-btn {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  border: 1px solid #3f1010;
+  border-radius: 8px;
+  background: #1a0a0a;
+  color: #ff6b6b;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  animation: fadeIn 0.25s ease-out both;
+}
+.calendar-reset-btn:hover { opacity: 0.85; }
+
+.calendar-helper-text {
+  margin: 0;
+  font-size: 12px;
+  color: #4a5568;
+  animation: fadeIn 0.3s ease-out both;
+}
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+.calendar-weekdays span {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: #334155;
+  padding: 4px 0;
+}
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  row-gap: 2px;
+}
+.calendar-day {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.15s ease;
+}
+.calendar-day:hover:not(.calendar-day-selected):not(.calendar-day-pending):not(.calendar-day-in-range):not(.calendar-day-future) {
+  background: #141729;
+  transform: scale(1.15);
+}
+.calendar-day-blank { cursor: default; visibility: hidden; }
+.calendar-day-future { color: #1e293b; cursor: default; }
+.calendar-day-today { color: #a29bfe; box-shadow: 0 0 0 1px #6c5ce7 inset; }
+.calendar-day-today .calendar-day-dot {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #6c5ce7;
+  animation: glowPulse 2s ease-in-out infinite;
+}
+.calendar-day-selected {
+  background: linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%);
+  color: #fff;
+  font-weight: 700;
+}
+.calendar-day-pending {
+  background: #6c5ce7;
+  color: #fff;
+  font-weight: 700;
+}
+.calendar-day-in-range {
+  background: rgba(108, 92, 231, 0.18);
+  color: #a29bfe;
+  border-radius: 0;
+}
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes glowPulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+/* Region filter card -- equal-share donut (a filter, not a volume chart) +
+   legend, restyled onto the same dark indigo palette as the calendar card. */
+.region-filter-card {
+  flex: 1 1 280px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: rgba(30, 41, 59, 0.5);
+  padding: 16px 20px;
+}
+.region-filter-card-header {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 16px;
+}
+.region-filter-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+.donut-wrap { position: relative; width: 120px; height: 120px; flex: none; }
+.region-donut { width: 100%; height: 100%; transform: rotate(-90deg); cursor: pointer; overflow: visible; }
+.region-donut circle { transition: opacity 0.15s ease, stroke-width 0.15s ease, filter 0.15s ease; }
+.region-donut .donut-seg-dim { opacity: 0.45; }
+.region-donut .donut-seg-active { filter: drop-shadow(0 0 3px currentColor); }
+.donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  pointer-events: none;
+}
+.donut-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.donut-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  cursor: pointer;
+}
+.donut-legend li.active { color: #fff; }
+.donut-legend .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.status-line { display: block; min-height: 17px; }
 
 .subtabs {
   display: flex;
@@ -155,6 +403,19 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 }
 
 .funnel-chart-wrap { min-width: 0; }
+
+/* Trends tab: IQL/MQL/SQL charts only, stacked -- each section keeps the
+   .channel card styling, main's own row-gap doesn't reach inside this single
+   wrapper child so it needs its own gap. */
+.trends-wrap { display: flex; flex-direction: column; gap: 24px; }
+.trends-stage-label {
+  margin: 0 0 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .funnel-chart-header {
   display: flex;
   flex-wrap: wrap;
@@ -233,10 +494,20 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
   text-shadow: 0 1px 1px rgba(0,0,0,0.35);
 }
 
-.pivot-wrap { min-width: 0; margin-top: 28px; }
+/* Pivot table card -- same dark indigo palette as the calendar/region filter
+   cards, reskinned for visual consistency; the underlying data/columns are
+   unchanged, this only touches colors, spacing and hover states. */
+.pivot-wrap {
+  min-width: 0;
+  margin-top: 28px;
+  border: 1px solid #1a1f35;
+  border-radius: 14px;
+  background: #0f1221;
+  padding: 16px;
+}
 .pivot-wrap h3 {
   font-size: 13px;
-  color: var(--text-2);
+  color: #94a3b8;
   margin: 0 0 12px;
   font-weight: 600;
 }
@@ -245,7 +516,7 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
   overflow-x: hidden;
   max-height: 520px;
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 1px solid #1a1f35;
   border-radius: 8px;
 }
 .pivot-table, .sql-table {
@@ -256,14 +527,16 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
   font-size: 11px;
 }
 .pivot-table th, .pivot-table td, .sql-table th, .sql-table td {
-  padding: 4px 5px;
+  padding: 5px 6px;
   text-align: right;
-  border-bottom: 1px solid var(--grid);
+  border-bottom: 1px solid #1a1f35;
   white-space: normal;
   overflow-wrap: break-word;
   font-variant-numeric: tabular-nums;
   vertical-align: top;
   line-height: 1.25;
+  color: #94a3b8;
+  transition: background 0.15s ease;
 }
 /* Numeric/status columns never need more than a couple of digits -- only
    break there as an absolute last resort, never mid-word. */
@@ -273,28 +546,42 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 .pivot-table thead th, .sql-table thead th {
   position: sticky;
   top: 0;
-  background: var(--surface);
-  color: var(--text-2);
+  background: #141729;
+  color: #4a5568;
   font-weight: 600;
-  font-size: 10.5px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   z-index: 2;
 }
 
-.pin { text-align: left; font-variant-numeric: normal; vertical-align: middle; color: var(--text-2); }
+.pin { text-align: left; font-variant-numeric: normal; vertical-align: middle; color: #94a3b8; }
 .pin-quarter, .pin-subsource, .pin-metric {
   position: sticky;
-  background: var(--surface);
+  background: #0f1221;
   z-index: 1;
 }
-.pin-quarter { left: 0; width: 88px; font-weight: 600; color: var(--text); word-break: normal; }
-.pin-subsource { left: 88px; width: 64px; word-break: normal; }
-.pin-metric { left: 152px; width: 62px; border-right: 1px solid var(--border); font-size: 10px; }
-.pivot-table thead .pin, .sql-table thead .pin { z-index: 3; }
+.pin-quarter { left: 0; width: 88px; font-weight: 700; color: #e2e8f0; word-break: normal; }
+.pin-subsource { left: 88px; width: 64px; word-break: normal; color: #cbd5e1; }
+.pin-metric { left: 152px; width: 62px; border-right: 1px solid #1a1f35; font-size: 10px; }
+.pivot-table thead .pin, .sql-table thead .pin { background: #141729; z-index: 3; }
 
-.pivot-cell-count { color: var(--text); font-weight: 600; }
+/* Row hover -- a soft purple wash across the row, matching the reference
+   card's hover treatment. */
+.pivot-table tbody tr:hover td { background: rgba(108, 92, 231, 0.08); }
+.pivot-table tbody tr:hover .pin { background: #171b30; }
 
-.pivot-total-col { border-left: 1px solid var(--border); background: var(--grid); }
-.pivot-total-row td { background: var(--grid); font-weight: 600; color: var(--text); }
+.pivot-cell-count { color: #e2e8f0; font-weight: 700; }
+
+.pivot-total-col { border-left: 1px solid #1a1f35; background: #141729; }
+.pivot-total-row td {
+  background: #141729 !important;
+  font-weight: 700;
+  color: #e2e8f0;
+  border-top: 2px solid #6c5ce7;
+}
+
+.pivot-cell-mrr { border-left: 1px solid #1a1f35; border-right: 1px solid #1a1f35; color: #a29bfe; font-weight: 700; }
 
 /* SQL's Opportunity Source / Sub Source values run longer than the other
    stages' quarter/status labels, so its pinned columns get more room. */
@@ -302,13 +589,575 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 .sql-table .pin-subsource { left: 76px; width: 108px; }
 .sql-table .pin-metric { left: 184px; width: 108px; font-size: 10.5px; }
 
-.empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+.empty { color: #4a5568; font-size: 13px; padding: 8px 0; }
 
 .fixed-range-note:not(:empty) {
   font-size: 12px;
-  color: var(--text-2);
-  background: var(--grid);
+  color: #94a3b8;
+  background: #141729;
   border-radius: 6px;
   padding: 8px 12px;
   margin-bottom: 16px;
 }
+
+/* Leads tab: Status cells with underlying lead detail (click to see them) */
+.pivot-cell-clickable {
+  cursor: pointer;
+  text-decoration: underline dotted #4a5568;
+  text-underline-offset: 3px;
+}
+.pivot-cell-clickable:hover {
+  background: rgba(108, 92, 231, 0.18) !important;
+  color: #a29bfe;
+  text-decoration-color: #a29bfe;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal-overlay.hidden { display: none; }
+
+.modal-box {
+  position: relative;
+  background: #0f1221;
+  border: 1px solid #1a1f35;
+  border-radius: 14px;
+  padding: 20px 24px;
+  width: min(640px, 92vw);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #141729;
+  border: 1px solid #1a1f35;
+  border-radius: 8px;
+  color: #4a5568;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.modal-close:hover { color: #cbd5e1; border-color: #334155; }
+
+.modal-header-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.modal-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #eda100;
+}
+.modal-count-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(237, 161, 0, 0.12);
+  border: 1px solid rgba(237, 161, 0, 0.35);
+  color: #eda100;
+}
+.modal-title {
+  margin: 0 0 14px;
+  padding-bottom: 14px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #e2e8f0;
+  border-bottom: 1px solid #1a1f35;
+}
+
+.modal-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal-timeline::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  background: #1a1f35;
+}
+.modal-timeline-item {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  z-index: 1;
+}
+.modal-timeline-dot {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2d2252;
+  border: 1px solid #3f2f8f;
+  color: #a29bfe;
+  font-size: 14px;
+}
+.modal-record-card {
+  flex: 1;
+  min-width: 0;
+  background: #141729;
+  border: 1px solid #1a1f35;
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.modal-record-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.modal-record-company {
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-record-tag {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #2d2252;
+  color: #a29bfe;
+}
+.modal-record-name {
+  display: block;
+  margin-top: 4px;
+  color: #a29bfe;
+  text-decoration: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+.modal-record-name:hover { color: #cbd5e1; text-decoration: underline; }
+.modal-record-title {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #4a5568;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-record-source {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #1a1f35;
+  font-size: 11px;
+  color: #4a5568;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-record-source span { color: #334155; font-weight: 600; margin-right: 4px; }
+
+.modal-footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #1a1f35;
+  font-size: 12px;
+  color: #4a5568;
+}
+
+/* ---- Overview row: bento grid of 4 boxes + live radar widget ---- */
+/* Same flex ratio (2:1, basis 520:280) as .secondary-row below, so the
+   boxes+radar row lines up pixel-for-pixel with the calendar+region-filter
+   row underneath instead of drifting (grid vs flex sizing don't match). */
+.overview-row {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  padding: 20px 24px 0;
+  min-height: 380px;
+}
+.overview-boxes {
+  flex: 2 1 520px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 16px;
+}
+.bento-tile {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  font: inherit;
+  text-align: left;
+  min-width: 0;
+}
+.bento-top { display: flex; align-items: center; justify-content: space-between; }
+.bento-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.bento-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.bento-icon svg { width: 18px; height: 18px; }
+.bento-icon-leads { background: rgba(42, 120, 214, 0.15); color: #2a78d6; }
+.bento-icon-ndl { background: rgba(27, 175, 122, 0.15); color: #1baf7a; }
+.bento-icon-sum { background: rgba(74, 58, 167, 0.18); color: #8a7ae0; }
+.bento-icon-spends { background: rgba(237, 161, 0, 0.15); color: #eda100; }
+.bento-value {
+  font-size: 38px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bento-caption { font-size: 13px; color: var(--muted); }
+.bento-tile-action {
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.bento-tile-action:hover { border-color: var(--accent); }
+.bento-value-action { color: #eda100; }
+
+/* Hot Account Radar -- fixed dark indigo card, same family as the calendar/
+   region-filter/table cards, matching the reference component exactly. */
+.radar-widget {
+  flex: 1 1 280px;
+  border: 1px solid #1a1f35;
+  border-radius: 16px;
+  padding: 20px;
+  background: #0f1221;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.radar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.radar-header-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4a5568;
+}
+.radar-live-text {
+  font-family: "SF Mono", "Consolas", "Menlo", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ff6b6b;
+  animation: glowPulse 1.2s ease-in-out infinite;
+}
+
+.radar-body { display: flex; align-items: center; gap: 24px; flex: 1; }
+.radar-scope { position: relative; width: 220px; height: 220px; flex: none; }
+.radar-svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.radar-svg-sweep { pointer-events: none; }
+.radar-ring { fill: none; stroke: #0e1e35; stroke-width: 0.8; }
+.radar-axis { stroke: #0e1e35; stroke-width: 0.6; }
+.radar-axis-diag { stroke: #080e1c; stroke-width: 0.5; }
+.radar-outer-border { fill: none; stroke: #1a2f50; stroke-width: 1.2; }
+
+.radar-sweep-glow {
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(108,92,231,0.04) 30deg, rgba(108,92,231,0.15) 55deg, rgba(108,92,231,0.35) 70deg, transparent 71deg);
+  animation: radar-spin 5s linear infinite;
+  pointer-events: none;
+}
+.radar-sweep-wrap {
+  transform-origin: 100px 100px;
+  animation: radar-spin 5s linear infinite;
+}
+.radar-sweep-line { stroke: #6c5ce7; stroke-width: 1.2; opacity: 0.9; }
+.radar-sweep-glow-line { stroke: #a29bfe; stroke-width: 3; opacity: 0.15; }
+@keyframes radar-spin { to { transform: rotate(360deg); } }
+
+.radar-center-dot { fill: #6c5ce7; }
+.radar-center-ring { fill: none; stroke: #6c5ce7; stroke-width: 0.6; opacity: 0.4; }
+
+.radar-blip-ring {
+  fill: none;
+  stroke-width: 0.8;
+  opacity: 0.5;
+  animation: radar-blip-ring-expand 2.4s ease-out infinite;
+}
+.radar-blip-ring-2 { stroke-width: 0.5; opacity: 0.25; }
+@keyframes radar-blip-ring-expand {
+  0%   { r: 2; opacity: 0.6; }
+  100% { r: 10; opacity: 0; }
+}
+.radar-blip-dot { opacity: 0.85; }
+
+.radar-readout {
+  flex: 1;
+  min-width: 0;
+  font-family: "SF Mono", "Consolas", "Menlo", monospace;
+  font-size: 12px;
+  line-height: 1.8;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.radar-readout-sys { color: #1e3a5f; font-size: 10.5px; letter-spacing: 0.1em; }
+.radar-readout-scan { color: #6c5ce7; font-weight: 700; letter-spacing: 0.04em; font-size: 13px; }
+.radar-cursor { animation: fadeIn 0.8s ease-in-out infinite; }
+.radar-readout-divider { height: 1px; background: #1a1f35; }
+.radar-readout-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.radar-readout-stats div { display: flex; justify-content: space-between; gap: 8px; }
+.radar-readout-stats span { color: #334155; }
+.radar-readout-stats b { color: #e2e8f0; font-weight: 700; }
+.radar-stat-ndl { color: #00d68f !important; }
+.radar-stat-sum { color: #a29bfe !important; }
+.radar-readout-status { color: #1e3a5f; font-size: 10px; word-break: break-word; }
+.radar-dot-ok { color: #00d68f; }
+
+
+/* ---- Spends view: mirrors the Leads dashboard's overview/secondary rows,
+   subtabs and channel table exactly, just with its own data source. Same
+   page/URL as Leads (no navigation) -- #leadsView and #spendsView are
+   mutually exclusive, toggled by showSpends(). ---- */
+.spends-view.hidden { display: none; }
+.spends-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 20px 24px 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.spends-back-btn:hover { color: var(--text); border-color: var(--text-2); }
+
+.spends-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: #94a3b8;
+  background: none;
+  border: none;
+  padding: 0 0 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.spends-group-toggle:hover { color: #e2e8f0; }
+.spends-group-arrow { color: #6c5ce7; font-size: 11px; width: 10px; }
+.spends-group-meta { margin-left: auto; color: #4a5568; font-weight: 500; }
+
+/* Higher specificity than the generic ".pivot-table th/td" rule (which sets
+   white-space:normal + overflow-wrap:break-word) -- without qualifying by
+   tag too, that rule was winning the cascade and wrapping long campaign
+   names onto a second line, making rows uneven. One fixed width for every
+   row (sized to fit the longest real campaign name without wrapping) plus
+   ellipsis truncation + the existing title="" tooltip keeps every row the
+   same height and the numeric columns aligned. */
+.pivot-table th.spends-th-name, .pivot-table td.spends-td-name,
+.spends-th-name, .spends-td-name {
+  width: 340px;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.spends-table th:not(.pin), .spends-table td:not(.pin) { text-align: right; }
+
+/* ============================================================
+   LIGHT THEME -- Netcore orange + white
+   Most layout/type already reads var(--page/--surface/--text/...), which the
+   :root[data-theme="light"] token block above already repoints. Everything
+   below re-skins the components that were built with literal hex values
+   (calendar, region filter, pivot table, modal, radar) instead of those
+   tokens, so they don't stay stuck in the dark-indigo look when switched.
+   Semantic status colors (live-dot green, NDL green, reset-button red) are
+   deliberately left alone in both themes -- they signal state, not brand.
+   ============================================================ */
+:root[data-theme="light"] .calendar-card {
+  border-color: #ffc27a;
+  background: #ffe6c2;
+  box-shadow: 0 1px 3px rgba(255, 106, 0, 0.1);
+}
+:root[data-theme="light"] .calendar-month-label { color: #a97a3e; }
+:root[data-theme="light"] .calendar-nav-btn { border-color: #ffc27a; color: #a97a3e; }
+:root[data-theme="light"] .calendar-nav-btn:hover { color: #6b3f10; border-color: #ff8c1a; }
+:root[data-theme="light"] .calendar-range-pill { background: #ffd8a3; color: #c2540a; }
+:root[data-theme="light"] .date-range-value { color: #d35400; }
+:root[data-theme="light"] .date-range-btn { border-color: #ffc27a; background: #ffedd4; color: #a97a3e; }
+:root[data-theme="light"] .date-range-btn.active { background: #ffcd8e; border-color: #ff6a00; color: #a03c00; }
+:root[data-theme="light"] .calendar-reset-btn { border-color: #f3b8b8; background: #fff2f2; color: #d63031; }
+:root[data-theme="light"] .calendar-helper-text { color: #a97a3e; }
+:root[data-theme="light"] .calendar-weekdays span { color: #a97a3e; }
+:root[data-theme="light"] .calendar-day { color: #8a6a48; }
+:root[data-theme="light"] .calendar-day:hover:not(.calendar-day-selected):not(.calendar-day-pending):not(.calendar-day-in-range):not(.calendar-day-future) {
+  background: #ffd8a3;
+}
+:root[data-theme="light"] .calendar-day-future { color: #e8c99e; }
+:root[data-theme="light"] .calendar-day-today { color: #d35400; box-shadow: 0 0 0 1px #ff6a00 inset; }
+:root[data-theme="light"] .calendar-day-today .calendar-day-dot { background: #ff6a00; }
+:root[data-theme="light"] .calendar-day-selected { background: linear-gradient(135deg, #ff6a00 0%, #ffb347 100%); color: #fff; }
+:root[data-theme="light"] .calendar-day-pending { background: #ff6a00; color: #fff; }
+:root[data-theme="light"] .calendar-day-in-range { background: rgba(255, 106, 0, 0.22); color: #a03c00; }
+
+:root[data-theme="light"] .region-filter-card { border-color: #ffc27a; background: #ffe6c2; }
+:root[data-theme="light"] .region-filter-card-header { color: #a97a3e; }
+:root[data-theme="light"] .donut-legend li { color: #7a5a30; }
+:root[data-theme="light"] .donut-legend li.active { color: #211307; }
+
+:root[data-theme="light"] .pivot-wrap { border-color: #ffc27a; background: #ffe6c2; }
+:root[data-theme="light"] .pivot-wrap h3 { color: #a97a3e; }
+:root[data-theme="light"] .table-scroll { border-color: #ffc27a; }
+:root[data-theme="light"] .pivot-table th,
+:root[data-theme="light"] .pivot-table td,
+:root[data-theme="light"] .sql-table th,
+:root[data-theme="light"] .sql-table td {
+  border-bottom-color: #ffcf94;
+  color: #6b4a26;
+}
+:root[data-theme="light"] .pivot-table thead th,
+:root[data-theme="light"] .sql-table thead th {
+  background: #ffd8a3;
+  color: #7a4a1e;
+}
+:root[data-theme="light"] .pin,
+:root[data-theme="light"] .pin-quarter,
+:root[data-theme="light"] .pin-subsource,
+:root[data-theme="light"] .pin-metric {
+  background: #ffe6c2;
+}
+:root[data-theme="light"] .pin-quarter { color: #211307; }
+:root[data-theme="light"] .pin-subsource { color: #6b4a26; }
+:root[data-theme="light"] .pin-metric { border-right-color: #ffcf94; }
+:root[data-theme="light"] .pivot-table thead .pin,
+:root[data-theme="light"] .sql-table thead .pin {
+  background: #ffd8a3;
+}
+:root[data-theme="light"] .pivot-table tbody tr:hover td { background: rgba(255, 106, 0, 0.14); }
+:root[data-theme="light"] .pivot-table tbody tr:hover .pin { background: #ffd8a3; }
+:root[data-theme="light"] .pivot-cell-count { color: #211307; }
+:root[data-theme="light"] .pivot-total-col { border-left-color: #ffcf94; background: #ffd8a3; }
+:root[data-theme="light"] .pivot-total-row td {
+  background: #ffd8a3 !important;
+  color: #211307;
+  border-top-color: #ff6a00;
+}
+:root[data-theme="light"] .pivot-cell-mrr { border-left-color: #ffcf94; border-right-color: #ffcf94; color: #a03c00; }
+:root[data-theme="light"] .sql-table .pin-quarter,
+:root[data-theme="light"] .sql-table .pin-subsource,
+:root[data-theme="light"] .sql-table .pin-metric {
+  border-right-color: #ffcf94;
+}
+:root[data-theme="light"] .empty { color: #a97a3e; }
+:root[data-theme="light"] .fixed-range-note:not(:empty) { color: #6b4a26; background: #ffd8a3; }
+:root[data-theme="light"] .pivot-cell-clickable { text-decoration-color: #c9a878; }
+:root[data-theme="light"] .pivot-cell-clickable:hover {
+  background: rgba(255, 106, 0, 0.15) !important;
+  color: #c2540a;
+  text-decoration-color: #c2540a;
+}
+
+:root[data-theme="light"] .modal-overlay { background: rgba(40, 24, 8, 0.4); }
+:root[data-theme="light"] .modal-box { background: #ffe6c2; border-color: #ffc27a; }
+:root[data-theme="light"] .modal-close { background: #ffd8a3; border-color: #ffc27a; color: #a97a3e; }
+:root[data-theme="light"] .modal-close:hover { color: #6b3f10; border-color: #ff8c1a; }
+:root[data-theme="light"] .modal-eyebrow { color: #a03c00; }
+:root[data-theme="light"] .modal-count-badge {
+  background: rgba(194, 84, 10, 0.16);
+  border-color: rgba(160, 60, 0, 0.4);
+  color: #a03c00;
+}
+:root[data-theme="light"] .modal-title { color: #211307; border-bottom-color: #ffc27a; }
+:root[data-theme="light"] .modal-timeline::before { background: #ffc27a; }
+:root[data-theme="light"] .modal-timeline-dot { background: #ffd8a3; border-color: #ff9a44; color: #a03c00; }
+:root[data-theme="light"] .modal-record-card { background: #fff3e2; border-color: #ffcf94; }
+:root[data-theme="light"] .modal-record-company { color: #211307; }
+:root[data-theme="light"] .modal-record-tag { background: #ffd8a3; color: #a03c00; }
+:root[data-theme="light"] .modal-record-name { color: #a03c00; }
+:root[data-theme="light"] .modal-record-name:hover { color: #6b2900; }
+:root[data-theme="light"] .modal-record-title { color: #8a6a48; }
+:root[data-theme="light"] .modal-record-source { border-top-color: #ffcf94; color: #8a6a48; }
+:root[data-theme="light"] .modal-record-source span { color: #a97a3e; }
+:root[data-theme="light"] .modal-footer { border-top-color: #ffc27a; color: #a97a3e; }
+
+:root[data-theme="light"] .radar-widget { border-color: #ffc27a; background: #ffe6c2; }
+:root[data-theme="light"] .radar-header-title { color: #a97a3e; }
+:root[data-theme="light"] .radar-live-text { color: #e63946; }
+:root[data-theme="light"] .radar-ring { stroke: #ffcf94; }
+:root[data-theme="light"] .radar-axis { stroke: #ffcf94; }
+:root[data-theme="light"] .radar-axis-diag { stroke: #ffd8a3; }
+:root[data-theme="light"] .radar-outer-border { stroke: #d35400; }
+:root[data-theme="light"] .radar-sweep-glow {
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(160,60,0,0.08) 30deg, rgba(160,60,0,0.22) 55deg, rgba(160,60,0,0.45) 70deg, transparent 71deg);
+}
+:root[data-theme="light"] .radar-sweep-line { stroke: #a03c00; }
+:root[data-theme="light"] .radar-sweep-glow-line { stroke: #ff6a00; }
+:root[data-theme="light"] .radar-center-dot { fill: #a03c00; }
+:root[data-theme="light"] .radar-center-ring { stroke: #a03c00; }
+:root[data-theme="light"] .radar-readout-sys { color: #a97a3e; }
+:root[data-theme="light"] .radar-readout-scan { color: #a03c00; }
+:root[data-theme="light"] .radar-readout-divider { background: #ffc27a; }
+:root[data-theme="light"] .radar-readout-stats span { color: #a97a3e; }
+:root[data-theme="light"] .radar-readout-stats b { color: #211307; }
+:root[data-theme="light"] .radar-stat-sum { color: #a03c00 !important; }
+:root[data-theme="light"] .radar-readout-status { color: #a97a3e; }
+
+:root[data-theme="light"] .spends-group-toggle { color: #6b4a26; }
+:root[data-theme="light"] .spends-group-toggle:hover { color: #211307; }
+:root[data-theme="light"] .spends-group-arrow { color: #a03c00; }
+:root[data-theme="light"] .spends-group-meta { color: #a97a3e; }
