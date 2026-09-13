@@ -21,13 +21,12 @@ const LINKEDIN_GROUP_TO_REGION = {
 };
 
 // Facebook has no Campaign Group Name column -- ecom campaigns are
-// identified by a case-sensitive substring in Campaign Name instead. No
-// LATAM keyword was given, so Facebook/LATAM is always empty (confirmed:
-// this isn't a bug, just no such campaigns exist yet).
+// identified by a case-sensitive substring in Campaign Name instead.
 const FACEBOOK_KEYWORD_TO_REGION = [
   ['IN_Ecomm', 'India'],
   ['SEA_Ecomm', 'SEA'],
   ['EU_Ecomm', 'EU'],
+  ['LATAM_Ecomm', 'LATAM'],
 ];
 
 const findCol = (headers, name) => headers.findIndex(h => (h || '').toString().trim().toLowerCase() === name.toLowerCase());

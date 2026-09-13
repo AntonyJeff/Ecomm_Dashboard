@@ -529,6 +529,7 @@ function renderCalendarHeader() {
 
 function renderCalendar() {
   renderCalendarHeader();
+  updateQuickRangeActive();
 
   const year = calendarViewDate.getUTCFullYear();
   const month = calendarViewDate.getUTCMonth();
@@ -594,6 +595,30 @@ function resetDateRange() {
   load();
 }
 
+// ---- Quick-range presets (7/14/30/60/90 days ending today) -- same idea as
+// the Spends tab's, mirrored here for the Leads dashboard's own calendar. ----
+function updateQuickRangeActive() {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  document.querySelectorAll('#quickRangeRow .quick-range-btn').forEach(btn => {
+    const days = parseInt(btn.dataset.days, 10);
+    const expectedStart = addDaysToDateStr(todayStr, -(days - 1));
+    const isActive = hasExplicitSelection && currentEndDate === todayStr && currentStartDate === expectedStart;
+    btn.classList.toggle('active', isActive);
+  });
+}
+
+function applyQuickRange(days) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  selectionMode = 'single';
+  pendingRangeStart = null;
+  currentEndDate = todayStr;
+  currentStartDate = addDaysToDateStr(todayStr, -(days - 1));
+  hasExplicitSelection = true;
+  calendarViewDate = new Date(currentEndDate + 'T00:00:00Z');
+  renderCalendar();
+  load();
+}
+
 function showSpends(show) {
   viewingSpends = show;
   document.getElementById('spendsView').classList.toggle('hidden', !show);
@@ -654,6 +679,11 @@ document.getElementById('calendarGrid').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-date]');
   if (!btn) return;
   handleDayClick(btn.dataset.date);
+});
+document.getElementById('quickRangeRow').addEventListener('click', (e) => {
+  const btn = e.target.closest('.quick-range-btn');
+  if (!btn) return;
+  applyQuickRange(parseInt(btn.dataset.days, 10));
 });
 
 document.getElementById('regionDonut').addEventListener('click', (e) => {
@@ -745,6 +775,76 @@ let spendsStartDate = SPENDS_DEFAULT_START_DATE;
 let spendsEndDate = SPENDS_DEFAULT_END_DATE;
 let spendsCalendarViewDate = new Date(spendsEndDate + 'T00:00:00Z');
 
+// ---- Period-over-period comparison -- only offered for a handful of round
+// window lengths (7 days / 2 weeks / 1 month / 3 months); anything else (an
+// arbitrary custom range) gets no compare toggle at all, since "previous
+// period" is ambiguous otherwise. ----
+let spendsComparePeriod = null; // detected {days, label} for the current range, or null
+let spendsCompareEnabled = false;
+let spendsPrevData = null; // full /api/clg-spends response for the immediately-preceding period of the same length
+
+function spendsDetectPeriod(startDate, endDate) {
+  const start = new Date(startDate + 'T00:00:00Z');
+  const end = new Date(endDate + 'T00:00:00Z');
+  const days = Math.round((end - start) / 86400000) + 1;
+  if (days < 1 || days > 30) return null;
+  return { days, label: `${days} day${days === 1 ? '' : 's'}` };
+}
+
+function addDaysToDateStr(dateStr, delta) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+// pct is null when there's nothing to compare (no prior-period figure at
+// all) -- callers render nothing in that case, vs. an explicit "NEW" badge
+// when the prior period exists but this specific campaign didn't.
+function deltaBadgeHtml(curr, prev) {
+  if (prev === undefined || prev === null) return '';
+  if (prev === 0) return curr === 0 ? '' : '<span class="kpi-delta kpi-delta-new">NEW</span>';
+  const pct = ((curr - prev) / prev) * 100;
+  const isUp = pct >= 0;
+  const cls = isUp ? 'kpi-delta-up' : 'kpi-delta-down';
+  const arrow = isUp ? '&#9650;' : '&#9660;';
+  return `<span class="kpi-delta ${cls}">${arrow} ${Math.abs(pct).toFixed(0)}%</span>`;
+}
+
+function spendsGetPrevChannelData() {
+  if (!spendsCompareEnabled || !spendsPrevData) return null;
+  return spendsPrevData.regions[spendsActiveRegion][spendsActiveChannel];
+}
+
+function spendsUpdateCompareToggle() {
+  spendsComparePeriod = spendsDetectPeriod(spendsStartDate, spendsEndDate);
+  const btn = document.getElementById('spendsCompareToggle');
+  const closeBtn = document.getElementById('spendsCompareClose');
+  if (!spendsComparePeriod) {
+    btn.classList.add('hidden');
+    closeBtn.classList.add('hidden');
+    spendsCompareEnabled = false;
+    spendsPrevData = null;
+    return;
+  }
+  btn.textContent = `Compare with previous ${spendsComparePeriod.label}`;
+  btn.classList.remove('hidden');
+  btn.classList.toggle('active', spendsCompareEnabled);
+  closeBtn.classList.toggle('hidden', !spendsCompareEnabled);
+}
+
+async function spendsFetchPrevIfNeeded() {
+  if (!spendsCompareEnabled || !spendsComparePeriod) { spendsPrevData = null; return; }
+  const prevEnd = addDaysToDateStr(spendsStartDate, -1);
+  const prevStart = addDaysToDateStr(prevEnd, -(spendsComparePeriod.days - 1));
+  try {
+    const res = await fetch(`/api/clg-spends?startDate=${prevStart}&endDate=${prevEnd}`);
+    const data = await res.json();
+    spendsPrevData = res.ok ? data : null;
+  } catch (err) {
+    spendsPrevData = null;
+  }
+}
+
 function spendsUpdateRangeLabel() {
   const label = document.getElementById('spendsDateRangeValue');
   const hasRange = spendsHasExplicitSelection && spendsStartDate !== spendsEndDate;
@@ -786,6 +886,7 @@ function spendsRenderCalendarHeader() {
 
 function spendsRenderCalendar() {
   spendsRenderCalendarHeader();
+  spendsUpdateQuickRangeActive();
 
   const year = spendsCalendarViewDate.getUTCFullYear();
   const month = spendsCalendarViewDate.getUTCMonth();
@@ -930,6 +1031,12 @@ function spendsRenderTable() {
   const channelData = spendsLastData.regions[spendsActiveRegion][spendsActiveChannel];
   const campaigns = channelData.campaigns;
   const kpi = channelData.kpi;
+  const prevChannelData = spendsGetPrevChannelData();
+  const prevKpi = prevChannelData ? prevChannelData.kpi : null;
+  const prevByName = new Map((prevChannelData ? prevChannelData.campaigns : []).map(c => [c.name, c]));
+  // Only render a delta at all once comparison is on for this range -- an
+  // undefined prev value (vs. a real 0) tells deltaBadgeHtml to render nothing.
+  const prevFor = (name, key) => prevChannelData ? ((prevByName.get(name) || { [key]: 0 })[key]) : undefined;
 
   document.getElementById('spendsGroupTitle').textContent = `${spendsActiveRegion} Campaigns`;
   document.getElementById('spendsGroupMeta').textContent = `${campaigns.length} campaign${campaigns.length === 1 ? '' : 's'} · ${fmtCurrency(kpi.spend)}`;
@@ -941,12 +1048,12 @@ function spendsRenderTable() {
     ? campaigns.map(c => `
       <tr>
         <td class="pin pin-quarter spends-td-name" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</td>
-        <td>${fmtCurrency(c.spend)}</td>
-        <td>${fmtInt(c.clicks)}</td>
-        <td>${fmtInt(c.impressions)}</td>
-        <td>${fmtDec(c.ctr)}%</td>
-        <td>${fmtCurrency(c.cpm)}</td>
-        <td>${fmtCurrency(c.cpc)}</td>
+        <td>${fmtCurrency(c.spend)}${deltaBadgeHtml(c.spend, prevFor(c.name, 'spend'))}</td>
+        <td>${fmtInt(c.clicks)}${deltaBadgeHtml(c.clicks, prevFor(c.name, 'clicks'))}</td>
+        <td>${fmtInt(c.impressions)}${deltaBadgeHtml(c.impressions, prevFor(c.name, 'impressions'))}</td>
+        <td>${fmtDec(c.ctr)}%${deltaBadgeHtml(c.ctr, prevFor(c.name, 'ctr'))}</td>
+        <td>${fmtCurrency(c.cpm)}${deltaBadgeHtml(c.cpm, prevFor(c.name, 'cpm'))}</td>
+        <td>${fmtCurrency(c.cpc)}${deltaBadgeHtml(c.cpc, prevFor(c.name, 'cpc'))}</td>
       </tr>
     `).join('')
     : '<tr><td colspan="7" class="empty">No matching campaigns in this range.</td></tr>';
@@ -955,25 +1062,39 @@ function spendsRenderTable() {
   tfoot.innerHTML = campaigns.length ? `
     <tr class="pivot-total-row">
       <td class="pin pin-quarter">Total</td>
-      <td>${fmtCurrency(kpi.spend)}</td>
-      <td>${fmtInt(kpi.clicks)}</td>
-      <td>${fmtInt(kpi.impressions)}</td>
-      <td>${fmtDec(kpi.ctr)}%</td>
-      <td>${fmtCurrency(kpi.cpm)}</td>
-      <td>${fmtCurrency(kpi.cpc)}</td>
+      <td>${fmtCurrency(kpi.spend)}${prevKpi ? deltaBadgeHtml(kpi.spend, prevKpi.spend) : ''}</td>
+      <td>${fmtInt(kpi.clicks)}${prevKpi ? deltaBadgeHtml(kpi.clicks, prevKpi.clicks) : ''}</td>
+      <td>${fmtInt(kpi.impressions)}${prevKpi ? deltaBadgeHtml(kpi.impressions, prevKpi.impressions) : ''}</td>
+      <td>${fmtDec(kpi.ctr)}%${prevKpi ? deltaBadgeHtml(kpi.ctr, prevKpi.ctr) : ''}</td>
+      <td>${fmtCurrency(kpi.cpm)}${prevKpi ? deltaBadgeHtml(kpi.cpm, prevKpi.cpm) : ''}</td>
+      <td>${fmtCurrency(kpi.cpc)}${prevKpi ? deltaBadgeHtml(kpi.cpc, prevKpi.cpc) : ''}</td>
     </tr>
   ` : '';
+}
+
+function spendsSetKpiDelta(elId, curr, prev) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.innerHTML = prev === null || prev === undefined ? '' : deltaBadgeHtml(curr, prev);
+  el.classList.toggle('hidden', !el.innerHTML);
 }
 
 function spendsRender() {
   if (!spendsLastData) return;
   const channelData = spendsLastData.regions[spendsActiveRegion][spendsActiveChannel];
   const kpi = channelData.kpi;
+  const prevChannelData = spendsGetPrevChannelData();
+  const prevKpi = prevChannelData ? prevChannelData.kpi : null;
 
   document.getElementById('spendsTotalSpend').textContent = fmtCurrency(kpi.spend);
   document.getElementById('spendsTotalClicks').textContent = fmtInt(kpi.clicks);
   document.getElementById('spendsCtr').textContent = `${fmtDec(kpi.ctr)}%`;
   document.getElementById('spendsCpm').textContent = fmtCurrency(kpi.cpm);
+
+  spendsSetKpiDelta('spendsTotalSpendDelta', kpi.spend, prevKpi ? prevKpi.spend : null);
+  spendsSetKpiDelta('spendsTotalClicksDelta', kpi.clicks, prevKpi ? prevKpi.clicks : null);
+  spendsSetKpiDelta('spendsCtrDelta', kpi.ctr, prevKpi ? prevKpi.ctr : null);
+  spendsSetKpiDelta('spendsCpmDelta', kpi.cpm, prevKpi ? prevKpi.cpm : null);
 
   spendsRenderRadar(kpi, channelData.campaigns.length);
   spendsRenderTable();
@@ -982,12 +1103,14 @@ function spendsRender() {
 async function spendsLoad() {
   const status = document.getElementById('spendsStatus');
   status.textContent = 'Loading...';
+  spendsUpdateCompareToggle();
   try {
     const res = await fetch(`/api/clg-spends?startDate=${spendsStartDate}&endDate=${spendsEndDate}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Request failed');
 
     spendsLastData = data;
+    await spendsFetchPrevIfNeeded();
     spendsRenderDonut();
     spendsRenderRegionLegend();
     spendsRender();
@@ -1029,14 +1152,77 @@ document.getElementById('spendsRegionLegend').addEventListener('click', (e) => {
 });
 
 document.getElementById('spendsChannelTabs').addEventListener('click', (e) => {
-  const btn = e.target.closest('.subtab');
+  // The compare-toggle/close buttons also live in this nav but aren't
+  // channel tabs -- only react to clicks on an actual data-channel button
+  // (LinkedIn/Meta Ads), otherwise this used to blow away spendsActiveChannel
+  // and steal the "active" class off the real tabs whenever compare was clicked.
+  const btn = e.target.closest('[data-channel]');
   if (!btn) return;
   spendsActiveChannel = btn.dataset.channel;
-  document.querySelectorAll('#spendsChannelTabs .subtab').forEach(t => t.classList.toggle('active', t === btn));
+  document.querySelectorAll('#spendsChannelTabs [data-channel]').forEach(t => t.classList.toggle('active', t === btn));
   spendsRender();
 });
 
 document.getElementById('spendsGroupToggle').addEventListener('click', spendsToggleGroup);
+
+function spendsDisableCompare() {
+  spendsCompareEnabled = false;
+  spendsPrevData = null;
+  document.getElementById('spendsCompareToggle').classList.remove('active');
+  document.getElementById('spendsCompareClose').classList.add('hidden');
+  spendsRender();
+}
+
+document.getElementById('spendsCompareToggle').addEventListener('click', async () => {
+  if (spendsCompareEnabled) {
+    spendsDisableCompare();
+    return;
+  }
+  spendsCompareEnabled = true;
+  document.getElementById('spendsCompareToggle').classList.add('active');
+  document.getElementById('spendsCompareClose').classList.remove('hidden');
+  const status = document.getElementById('spendsStatus');
+  status.textContent = 'Loading comparison...';
+  await spendsFetchPrevIfNeeded();
+  status.textContent = '';
+  spendsRender();
+});
+
+document.getElementById('spendsCompareClose').addEventListener('click', (e) => {
+  e.stopPropagation();
+  spendsDisableCompare();
+});
+
+// ---- Quick-range presets (7/14/30/60/90 days ending today), matching the
+// canned windows LinkedIn/Meta Ads' own dashboards offer, as an alternative
+// to manually picking two dates on the calendar. ----
+function spendsUpdateQuickRangeActive() {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  document.querySelectorAll('#spendsQuickRangeRow .quick-range-btn').forEach(btn => {
+    const days = parseInt(btn.dataset.days, 10);
+    const expectedStart = addDaysToDateStr(todayStr, -(days - 1));
+    const isActive = spendsHasExplicitSelection && spendsEndDate === todayStr && spendsStartDate === expectedStart;
+    btn.classList.toggle('active', isActive);
+  });
+}
+
+function spendsApplyQuickRange(days) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  spendsSelectionMode = 'single';
+  spendsPendingRangeStart = null;
+  spendsEndDate = todayStr;
+  spendsStartDate = addDaysToDateStr(todayStr, -(days - 1));
+  spendsHasExplicitSelection = true;
+  spendsCalendarViewDate = new Date(spendsEndDate + 'T00:00:00Z');
+  spendsRenderCalendar();
+  spendsLoad();
+}
+
+document.getElementById('spendsQuickRangeRow').addEventListener('click', (e) => {
+  const btn = e.target.closest('.quick-range-btn');
+  if (!btn) return;
+  spendsApplyQuickRange(parseInt(btn.dataset.days, 10));
+});
 
 renderCalendar();
 load();

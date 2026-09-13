@@ -144,6 +144,13 @@
           </button>
         </div>
       </div>
+      <div class="quick-range-row" id="quickRangeRow">
+        <button type="button" class="quick-range-btn" data-days="7">7D</button>
+        <button type="button" class="quick-range-btn" data-days="14">14D</button>
+        <button type="button" class="quick-range-btn" data-days="30">30D</button>
+        <button type="button" class="quick-range-btn" data-days="60">60D</button>
+        <button type="button" class="quick-range-btn" data-days="90">90D</button>
+      </div>
       <p class="calendar-helper-text hidden" id="calendarHelperText">Click a start date, then click an end date</p>
       <div class="calendar-weekdays">
         <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
@@ -185,7 +192,10 @@
               <svg viewBox="0 0 20 20" fill="none"><path d="M10 2v16M14 5.5c0-1.4-1.8-2.5-4-2.5s-4 1.1-4 2.5S7.8 8 10 8s4 1.1 4 2.5-1.8 2.5-4 2.5-4-1.1-4-2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             </span>
           </div>
-          <div class="bento-value" id="spendsTotalSpend">-</div>
+          <div class="bento-value-row">
+            <div class="bento-value" id="spendsTotalSpend">-</div>
+            <span class="kpi-delta hidden" id="spendsTotalSpendDelta"></span>
+          </div>
           <div class="bento-caption">this period</div>
         </div>
 
@@ -196,7 +206,10 @@
               <svg viewBox="0 0 20 20" fill="none"><path d="M6 3l9 6-4 1.5L13 15l-2.5 1L8 11l-2 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
             </span>
           </div>
-          <div class="bento-value" id="spendsTotalClicks">-</div>
+          <div class="bento-value-row">
+            <div class="bento-value" id="spendsTotalClicks">-</div>
+            <span class="kpi-delta hidden" id="spendsTotalClicksDelta"></span>
+          </div>
           <div class="bento-caption">this period</div>
         </div>
 
@@ -207,7 +220,10 @@
               <svg viewBox="0 0 20 20" fill="none"><path d="M3 15l4-5 3 3 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </span>
           </div>
-          <div class="bento-value" id="spendsCtr">-</div>
+          <div class="bento-value-row">
+            <div class="bento-value" id="spendsCtr">-</div>
+            <span class="kpi-delta hidden" id="spendsCtrDelta"></span>
+          </div>
           <div class="bento-caption">click-through rate</div>
         </div>
 
@@ -218,7 +234,10 @@
               <svg viewBox="0 0 20 20" fill="none"><rect x="2" y="5" width="16" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M2 8h16" stroke="currentColor" stroke-width="2"/></svg>
             </span>
           </div>
-          <div class="bento-value" id="spendsCpm">-</div>
+          <div class="bento-value-row">
+            <div class="bento-value" id="spendsCpm">-</div>
+            <span class="kpi-delta hidden" id="spendsCpmDelta"></span>
+          </div>
           <div class="bento-caption">cost per 1000 impr.</div>
         </div>
       </div>
@@ -298,6 +317,13 @@
             </button>
           </div>
         </div>
+        <div class="quick-range-row" id="spendsQuickRangeRow">
+          <button type="button" class="quick-range-btn" data-days="7">7D</button>
+          <button type="button" class="quick-range-btn" data-days="14">14D</button>
+          <button type="button" class="quick-range-btn" data-days="30">30D</button>
+          <button type="button" class="quick-range-btn" data-days="60">60D</button>
+          <button type="button" class="quick-range-btn" data-days="90">90D</button>
+        </div>
         <p class="calendar-helper-text hidden" id="spendsCalendarHelperText">Click a start date, then click an end date</p>
         <div class="calendar-weekdays">
           <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
@@ -321,6 +347,8 @@
     <nav class="subtabs" id="spendsChannelTabs">
       <button type="button" class="subtab active" data-channel="linkedin">LinkedIn</button>
       <button type="button" class="subtab" data-channel="meta">Meta Ads</button>
+      <button type="button" class="compare-toggle hidden" id="spendsCompareToggle"></button>
+      <button type="button" class="compare-toggle-close hidden" id="spendsCompareClose" aria-label="Clear comparison" title="Clear comparison">&times;</button>
     </nav>
 
     <main>
