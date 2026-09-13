@@ -64,6 +64,37 @@ function initTheme() {
 }
 initTheme();
 
+// ---- GSAP micro-interactions -- everything below degrades to plain,
+// un-animated behavior if the CDN script failed to load (window.gsap
+// missing), so a network hiccup never breaks the dashboard itself. ----
+const gsapReady = typeof window !== 'undefined' && !!window.gsap;
+if (gsapReady && window.ScrollToPlugin) gsap.registerPlugin(ScrollToPlugin);
+
+function animateViewIn(el, fromY = 14) {
+  if (!gsapReady || !el) return;
+  gsap.fromTo(el, { autoAlpha: 0, y: fromY }, { autoAlpha: 1, y: 0, duration: 0.4, ease: 'power2.out' });
+}
+
+function animateRowsIn(rows) {
+  if (!gsapReady || !rows || !rows.length) return;
+  gsap.fromTo(rows, { autoAlpha: 0, y: 10 }, { autoAlpha: 1, y: 0, duration: 0.3, stagger: 0.025, ease: 'power2.out' });
+}
+
+function animateBadgesIn(badges, delay = 0.1) {
+  if (!gsapReady || !badges || !badges.length) return;
+  gsap.fromTo(badges, { scale: 0, autoAlpha: 0 }, { scale: 1, autoAlpha: 1, duration: 0.35, stagger: 0.02, delay, ease: 'back.out(2.2)' });
+}
+
+function pulseScale(el) {
+  if (!gsapReady || !el) return;
+  gsap.fromTo(el, { scale: 0.88 }, { scale: 1, duration: 0.35, ease: 'back.out(3)' });
+}
+
+function smoothScrollTop() {
+  if (!gsapReady || !window.ScrollToPlugin) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+  gsap.to(window, { duration: 0.6, scrollTo: 0, ease: 'power2.out' });
+}
+
 function escapeHtml(s) {
   return (s || '').toString()
     .replace(/&/g, '&amp;')
@@ -376,10 +407,12 @@ function render() {
   app.innerHTML = '';
   if (activeStage === 'trends') {
     app.appendChild(renderTrends(activeRegion));
+    animateViewIn(app);
     return;
   }
   const data = lastData.regions[activeRegion][activeStage];
   app.appendChild(renderRegion(activeRegion, activeStage, data));
+  animateViewIn(app);
 }
 
 // ---- Overview boxes: Leads / Total NDL / Leads+NDL for the active region,
@@ -581,6 +614,7 @@ function handleDayClick(dateStr) {
   }
   hasExplicitSelection = true;
   renderCalendar();
+  pulseScale(document.querySelector('#calendarGrid .calendar-day-selected, #calendarGrid .calendar-day-pending'));
   load();
 }
 
@@ -621,8 +655,12 @@ function applyQuickRange(days) {
 
 function showSpends(show) {
   viewingSpends = show;
-  document.getElementById('spendsView').classList.toggle('hidden', !show);
-  document.getElementById('leadsView').classList.toggle('hidden', show);
+  const spendsEl = document.getElementById('spendsView');
+  const leadsEl = document.getElementById('leadsView');
+  spendsEl.classList.toggle('hidden', !show);
+  leadsEl.classList.toggle('hidden', show);
+  animateViewIn(show ? spendsEl : leadsEl, 18);
+  smoothScrollTop();
   if (show) {
     spendsRenderCalendar();
     spendsLoad();
@@ -659,6 +697,7 @@ function selectRegion(regionKey) {
   renderDonut();
   renderRegionLegend();
   renderRadar();
+  smoothScrollTop();
 }
 
 document.getElementById('dateRangeBtn').addEventListener('click', () => {
@@ -683,6 +722,7 @@ document.getElementById('calendarGrid').addEventListener('click', (e) => {
 document.getElementById('quickRangeRow').addEventListener('click', (e) => {
   const btn = e.target.closest('.quick-range-btn');
   if (!btn) return;
+  pulseScale(btn);
   applyQuickRange(parseInt(btn.dataset.days, 10));
 });
 
@@ -706,6 +746,7 @@ document.getElementById('stageTabs').addEventListener('click', (e) => {
   if (!btn) return;
   activeStage = btn.dataset.stage;
   document.querySelectorAll('#stageTabs .subtab').forEach(t => t.classList.toggle('active', t === btn));
+  pulseScale(btn);
   render();
 });
 
@@ -737,10 +778,22 @@ function openLeadModal(records, statusLabel) {
   `).join('');
   modalFooter.textContent = `Showing ${records.length} lead${records.length === 1 ? '' : 's'} in this cell`;
   leadModal.classList.remove('hidden');
+  const box = leadModal.querySelector('.modal-box');
+  if (gsapReady) {
+    gsap.fromTo(leadModal, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.25, ease: 'power2.out' });
+    gsap.fromTo(box, { autoAlpha: 0, y: 24, scale: 0.94 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.4, ease: 'back.out(1.7)' });
+    animateRowsIn(modalTimeline.querySelectorAll('.modal-timeline-item'));
+  }
 }
 
 function closeLeadModal() {
-  leadModal.classList.add('hidden');
+  if (!gsapReady) {
+    leadModal.classList.add('hidden');
+    return;
+  }
+  const box = leadModal.querySelector('.modal-box');
+  gsap.to(box, { autoAlpha: 0, y: 16, scale: 0.94, duration: 0.2, ease: 'power2.in' });
+  gsap.to(leadModal, { autoAlpha: 0, duration: 0.22, ease: 'power2.in', onComplete: () => leadModal.classList.add('hidden') });
 }
 
 document.getElementById('app').addEventListener('click', (e) => {
@@ -937,6 +990,7 @@ function spendsHandleDayClick(dateStr) {
   }
   spendsHasExplicitSelection = true;
   spendsRenderCalendar();
+  pulseScale(document.querySelector('#spendsCalendarGrid .calendar-day-selected, #spendsCalendarGrid .calendar-day-pending'));
   spendsLoad();
 }
 
@@ -1070,6 +1124,9 @@ function spendsRenderTable() {
       <td>${fmtCurrency(kpi.cpc)}${prevKpi ? deltaBadgeHtml(kpi.cpc, prevKpi.cpc) : ''}</td>
     </tr>
   ` : '';
+
+  animateRowsIn(tbody.querySelectorAll('tr'));
+  animateBadgesIn(document.querySelectorAll('#spendsTableBody .kpi-delta, #spendsTableFoot .kpi-delta'), 0.15);
 }
 
 function spendsSetKpiDelta(elId, curr, prev) {
@@ -1077,6 +1134,7 @@ function spendsSetKpiDelta(elId, curr, prev) {
   if (!el) return;
   el.innerHTML = prev === null || prev === undefined ? '' : deltaBadgeHtml(curr, prev);
   el.classList.toggle('hidden', !el.innerHTML);
+  if (el.firstElementChild) animateBadgesIn([el.firstElementChild], 0);
 }
 
 function spendsRender() {
@@ -1160,6 +1218,7 @@ document.getElementById('spendsChannelTabs').addEventListener('click', (e) => {
   if (!btn) return;
   spendsActiveChannel = btn.dataset.channel;
   document.querySelectorAll('#spendsChannelTabs [data-channel]').forEach(t => t.classList.toggle('active', t === btn));
+  pulseScale(btn);
   spendsRender();
 });
 
@@ -1173,7 +1232,7 @@ function spendsDisableCompare() {
   spendsRender();
 }
 
-document.getElementById('spendsCompareToggle').addEventListener('click', async () => {
+document.getElementById('spendsCompareToggle').addEventListener('click', async (e) => {
   if (spendsCompareEnabled) {
     spendsDisableCompare();
     return;
@@ -1181,6 +1240,7 @@ document.getElementById('spendsCompareToggle').addEventListener('click', async (
   spendsCompareEnabled = true;
   document.getElementById('spendsCompareToggle').classList.add('active');
   document.getElementById('spendsCompareClose').classList.remove('hidden');
+  pulseScale(e.currentTarget);
   const status = document.getElementById('spendsStatus');
   status.textContent = 'Loading comparison...';
   await spendsFetchPrevIfNeeded();
@@ -1221,6 +1281,7 @@ function spendsApplyQuickRange(days) {
 document.getElementById('spendsQuickRangeRow').addEventListener('click', (e) => {
   const btn = e.target.closest('.quick-range-btn');
   if (!btn) return;
+  pulseScale(btn);
   spendsApplyQuickRange(parseInt(btn.dataset.days, 10));
 });
 

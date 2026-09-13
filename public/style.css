@@ -18,22 +18,27 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --page:        #ffffff;
-  /* Deeper orange tint than the first pass -- cards need to read as visibly
-     orange against the white page, not near-white-on-white (per user
-     feedback: "a bit of a darker orange... more vibrant, more visible"). */
-  --surface:     #ffe6c2;
-  --text:        #211307;
-  --text-2:      #8a6a48;
-  --muted:       #a97a3e;
-  --grid:        #ffc98a;
-  --border:      #ffc27a;
-  --accent:      #ff6a00;
-  --accent-2:    #ffb347;
+  /* Multi-color fintech-app palette (per reference: soft lavender page, white
+     cards, purple/teal/pink/amber accents scattered across icons and states)
+     -- replaces the earlier single-hue orange tint entirely. */
+  --page:        #f2f0fb;
+  --surface:     #ffffff;
+  --text:        #201c34;
+  --text-2:      #6f6a8c;
+  --muted:       #9691b4;
+  --grid:        #eeeaf9;
+  --border:      #e6e2f5;
+  --accent:      #6c5ce7;
+  --accent-2:    #00c2a8;
+  --accent-pink: #ff6fa5;
+  --accent-amber:#ffc75f;
+  --accent-blue: #4da3ff;
+  --card-shadow: 0 4px 18px rgba(108, 92, 231, 0.1);
 }
 
 * { box-sizing: border-box; }
 .hidden { display: none !important; }
+html { scroll-behavior: smooth; }
 
 body {
   margin: 0;
@@ -1090,144 +1095,141 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 .spends-table th:not(.pin), .spends-table td:not(.pin) { text-align: right; }
 
 /* ============================================================
-   LIGHT THEME -- Netcore orange + white
-   Most layout/type already reads var(--page/--surface/--text/...), which the
-   :root[data-theme="light"] token block above already repoints. Everything
-   below re-skins the components that were built with literal hex values
-   (calendar, region filter, pivot table, modal, radar) instead of those
-   tokens, so they don't stay stuck in the dark-indigo look when switched.
-   Semantic status colors (live-dot green, NDL green, reset-button red) are
-   deliberately left alone in both themes -- they signal state, not brand.
+   LIGHT THEME -- multi-color fintech-app look (white cards on a soft
+   lavender page, purple/teal/pink/amber accents), replacing the earlier
+   single-hue orange tint per reference screenshot. Semantic status colors
+   (live-dot green, NDL green, reset-button red) are deliberately left alone
+   in both themes -- they signal state, not brand.
    ============================================================ */
 :root[data-theme="light"] .calendar-card {
-  border-color: #ffc27a;
-  background: #ffe6c2;
-  box-shadow: 0 1px 3px rgba(255, 106, 0, 0.1);
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
 }
-:root[data-theme="light"] .calendar-month-label { color: #a97a3e; }
-:root[data-theme="light"] .calendar-nav-btn { border-color: #ffc27a; color: #a97a3e; }
-:root[data-theme="light"] .calendar-nav-btn:hover { color: #6b3f10; border-color: #ff8c1a; }
-:root[data-theme="light"] .calendar-range-pill { background: #ffd8a3; color: #c2540a; }
-:root[data-theme="light"] .date-range-value { color: #d35400; }
-:root[data-theme="light"] .date-range-btn { border-color: #ffc27a; background: #ffedd4; color: #a97a3e; }
-:root[data-theme="light"] .date-range-btn.active { background: #ffcd8e; border-color: #ff6a00; color: #a03c00; }
+:root[data-theme="light"] .calendar-month-label { color: var(--text-2); }
+:root[data-theme="light"] .calendar-nav-btn { border-color: var(--border); color: var(--text-2); }
+:root[data-theme="light"] .calendar-nav-btn:hover { color: var(--accent); border-color: var(--accent); }
+:root[data-theme="light"] .calendar-range-pill { background: rgba(108, 92, 231, 0.12); color: var(--accent); }
+:root[data-theme="light"] .date-range-value { color: var(--accent); }
+:root[data-theme="light"] .date-range-btn { border-color: var(--border); background: #f6f4fd; color: var(--text-2); }
+:root[data-theme="light"] .date-range-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 :root[data-theme="light"] .calendar-reset-btn { border-color: #f3b8b8; background: #fff2f2; color: #d63031; }
-:root[data-theme="light"] .calendar-helper-text { color: #a97a3e; }
-:root[data-theme="light"] .calendar-weekdays span { color: #a97a3e; }
-:root[data-theme="light"] .calendar-day { color: #8a6a48; }
+:root[data-theme="light"] .calendar-helper-text { color: var(--text-2); }
+:root[data-theme="light"] .calendar-weekdays span { color: var(--text-2); }
+:root[data-theme="light"] .calendar-day { color: var(--text); }
 :root[data-theme="light"] .calendar-day:hover:not(.calendar-day-selected):not(.calendar-day-pending):not(.calendar-day-in-range):not(.calendar-day-future) {
-  background: #ffd8a3;
+  background: rgba(0, 194, 168, 0.14);
 }
-:root[data-theme="light"] .calendar-day-future { color: #e8c99e; }
-:root[data-theme="light"] .calendar-day-today { color: #d35400; box-shadow: 0 0 0 1px #ff6a00 inset; }
-:root[data-theme="light"] .calendar-day-today .calendar-day-dot { background: #ff6a00; }
-:root[data-theme="light"] .calendar-day-selected { background: linear-gradient(135deg, #ff6a00 0%, #ffb347 100%); color: #fff; }
-:root[data-theme="light"] .calendar-day-pending { background: #ff6a00; color: #fff; }
-:root[data-theme="light"] .calendar-day-in-range { background: rgba(255, 106, 0, 0.22); color: #a03c00; }
+:root[data-theme="light"] .calendar-day-future { color: #cfc9e8; }
+:root[data-theme="light"] .calendar-day-today { color: var(--accent-2); box-shadow: 0 0 0 1px var(--accent-2) inset; }
+:root[data-theme="light"] .calendar-day-today .calendar-day-dot { background: var(--accent-2); }
+:root[data-theme="light"] .calendar-day-selected { background: linear-gradient(135deg, var(--accent) 0%, var(--accent-pink) 100%); color: #fff; }
+:root[data-theme="light"] .calendar-day-pending { background: var(--accent); color: #fff; }
+:root[data-theme="light"] .calendar-day-in-range { background: rgba(108, 92, 231, 0.16); color: var(--accent); }
 
-:root[data-theme="light"] .region-filter-card { border-color: #ffc27a; background: #ffe6c2; }
-:root[data-theme="light"] .region-filter-card-header { color: #a97a3e; }
-:root[data-theme="light"] .donut-legend li { color: #7a5a30; }
-:root[data-theme="light"] .donut-legend li.active { color: #211307; }
+:root[data-theme="light"] .region-filter-card { border-color: var(--border); background: var(--surface); box-shadow: var(--card-shadow); }
+:root[data-theme="light"] .region-filter-card-header { color: var(--text-2); }
+:root[data-theme="light"] .donut-legend li { color: var(--text-2); }
+:root[data-theme="light"] .donut-legend li.active { color: var(--text); }
 
-:root[data-theme="light"] .pivot-wrap { border-color: #ffc27a; background: #ffe6c2; }
-:root[data-theme="light"] .pivot-wrap h3 { color: #a97a3e; }
-:root[data-theme="light"] .table-scroll { border-color: #ffc27a; }
+:root[data-theme="light"] .pivot-wrap { border-color: var(--border); background: var(--surface); box-shadow: var(--card-shadow); }
+:root[data-theme="light"] .pivot-wrap h3 { color: var(--text-2); }
+:root[data-theme="light"] .table-scroll { border-color: var(--border); }
 :root[data-theme="light"] .pivot-table th,
 :root[data-theme="light"] .pivot-table td,
 :root[data-theme="light"] .sql-table th,
 :root[data-theme="light"] .sql-table td {
-  border-bottom-color: #ffcf94;
-  color: #6b4a26;
+  border-bottom-color: var(--grid);
+  color: var(--text-2);
 }
 :root[data-theme="light"] .pivot-table thead th,
 :root[data-theme="light"] .sql-table thead th {
-  background: #ffd8a3;
-  color: #7a4a1e;
+  background: #f6f4fd;
+  color: #4a3aa0;
 }
 :root[data-theme="light"] .pin,
 :root[data-theme="light"] .pin-quarter,
 :root[data-theme="light"] .pin-subsource,
 :root[data-theme="light"] .pin-metric {
-  background: #ffe6c2;
+  background: var(--surface);
 }
-:root[data-theme="light"] .pin-quarter { color: #211307; }
-:root[data-theme="light"] .pin-subsource { color: #6b4a26; }
-:root[data-theme="light"] .pin-metric { border-right-color: #ffcf94; }
+:root[data-theme="light"] .pin-quarter { color: var(--text); }
+:root[data-theme="light"] .pin-subsource { color: var(--text-2); }
+:root[data-theme="light"] .pin-metric { border-right-color: var(--grid); }
 :root[data-theme="light"] .pivot-table thead .pin,
 :root[data-theme="light"] .sql-table thead .pin {
-  background: #ffd8a3;
+  background: #f6f4fd;
 }
-:root[data-theme="light"] .pivot-table tbody tr:hover td { background: rgba(255, 106, 0, 0.14); }
-:root[data-theme="light"] .pivot-table tbody tr:hover .pin { background: #ffd8a3; }
-:root[data-theme="light"] .pivot-cell-count { color: #211307; }
-:root[data-theme="light"] .pivot-total-col { border-left-color: #ffcf94; background: #ffd8a3; }
+:root[data-theme="light"] .pivot-table tbody tr:hover td { background: rgba(108, 92, 231, 0.08); }
+:root[data-theme="light"] .pivot-table tbody tr:hover .pin { background: #efe9fb; }
+:root[data-theme="light"] .pivot-cell-count { color: var(--text); }
+:root[data-theme="light"] .pivot-total-col { border-left-color: var(--border); background: #efe9fb; }
 :root[data-theme="light"] .pivot-total-row td {
-  background: #ffd8a3 !important;
-  color: #211307;
-  border-top-color: #ff6a00;
+  background: #efe9fb !important;
+  color: var(--text);
+  border-top-color: var(--accent);
 }
-:root[data-theme="light"] .pivot-cell-mrr { border-left-color: #ffcf94; border-right-color: #ffcf94; color: #a03c00; }
+:root[data-theme="light"] .pivot-cell-mrr { border-left-color: var(--border); border-right-color: var(--border); color: #009e87; }
 :root[data-theme="light"] .sql-table .pin-quarter,
 :root[data-theme="light"] .sql-table .pin-subsource,
 :root[data-theme="light"] .sql-table .pin-metric {
-  border-right-color: #ffcf94;
+  border-right-color: var(--grid);
 }
-:root[data-theme="light"] .empty { color: #a97a3e; }
-:root[data-theme="light"] .fixed-range-note:not(:empty) { color: #6b4a26; background: #ffd8a3; }
-:root[data-theme="light"] .pivot-cell-clickable { text-decoration-color: #c9a878; }
+:root[data-theme="light"] .empty { color: var(--muted); }
+:root[data-theme="light"] .fixed-range-note:not(:empty) { color: var(--text-2); background: #f6f4fd; }
+:root[data-theme="light"] .pivot-cell-clickable { text-decoration-color: var(--muted); }
 :root[data-theme="light"] .pivot-cell-clickable:hover {
-  background: rgba(255, 106, 0, 0.15) !important;
-  color: #c2540a;
-  text-decoration-color: #c2540a;
+  background: rgba(108, 92, 231, 0.14) !important;
+  color: var(--accent);
+  text-decoration-color: var(--accent);
 }
 
-:root[data-theme="light"] .modal-overlay { background: rgba(40, 24, 8, 0.4); }
-:root[data-theme="light"] .modal-box { background: #ffe6c2; border-color: #ffc27a; }
-:root[data-theme="light"] .modal-close { background: #ffd8a3; border-color: #ffc27a; color: #a97a3e; }
-:root[data-theme="light"] .modal-close:hover { color: #6b3f10; border-color: #ff8c1a; }
-:root[data-theme="light"] .modal-eyebrow { color: #a03c00; }
+:root[data-theme="light"] .modal-overlay { background: rgba(32, 28, 52, 0.4); }
+:root[data-theme="light"] .modal-box { background: var(--surface); border-color: var(--border); box-shadow: 0 20px 48px rgba(108, 92, 231, 0.22); }
+:root[data-theme="light"] .modal-close { background: #f6f4fd; border-color: var(--border); color: var(--text-2); }
+:root[data-theme="light"] .modal-close:hover { color: var(--accent); border-color: var(--accent); }
+:root[data-theme="light"] .modal-eyebrow { color: var(--accent-pink); }
 :root[data-theme="light"] .modal-count-badge {
-  background: rgba(194, 84, 10, 0.16);
-  border-color: rgba(160, 60, 0, 0.4);
-  color: #a03c00;
+  background: rgba(108, 92, 231, 0.12);
+  border-color: rgba(108, 92, 231, 0.35);
+  color: var(--accent);
 }
-:root[data-theme="light"] .modal-title { color: #211307; border-bottom-color: #ffc27a; }
-:root[data-theme="light"] .modal-timeline::before { background: #ffc27a; }
-:root[data-theme="light"] .modal-timeline-dot { background: #ffd8a3; border-color: #ff9a44; color: #a03c00; }
-:root[data-theme="light"] .modal-record-card { background: #fff3e2; border-color: #ffcf94; }
-:root[data-theme="light"] .modal-record-company { color: #211307; }
-:root[data-theme="light"] .modal-record-tag { background: #ffd8a3; color: #a03c00; }
-:root[data-theme="light"] .modal-record-name { color: #a03c00; }
-:root[data-theme="light"] .modal-record-name:hover { color: #6b2900; }
-:root[data-theme="light"] .modal-record-title { color: #8a6a48; }
-:root[data-theme="light"] .modal-record-source { border-top-color: #ffcf94; color: #8a6a48; }
-:root[data-theme="light"] .modal-record-source span { color: #a97a3e; }
-:root[data-theme="light"] .modal-footer { border-top-color: #ffc27a; color: #a97a3e; }
+:root[data-theme="light"] .modal-title { color: var(--text); border-bottom-color: var(--border); }
+:root[data-theme="light"] .modal-timeline::before { background: var(--border); }
+:root[data-theme="light"] .modal-timeline-dot { background: #f6f4fd; border-color: var(--accent); color: var(--accent); }
+:root[data-theme="light"] .modal-record-card { background: #faf9ff; border-color: var(--border); }
+:root[data-theme="light"] .modal-record-company { color: var(--text); }
+:root[data-theme="light"] .modal-record-tag { background: rgba(108, 92, 231, 0.12); color: var(--accent); }
+:root[data-theme="light"] .modal-record-name { color: var(--accent); }
+:root[data-theme="light"] .modal-record-name:hover { color: #4a3aa0; }
+:root[data-theme="light"] .modal-record-title { color: var(--text-2); }
+:root[data-theme="light"] .modal-record-source { border-top-color: var(--border); color: var(--text-2); }
+:root[data-theme="light"] .modal-record-source span { color: var(--text-2); }
+:root[data-theme="light"] .modal-footer { border-top-color: var(--border); color: var(--text-2); }
 
-:root[data-theme="light"] .radar-widget { border-color: #ffc27a; background: #ffe6c2; }
-:root[data-theme="light"] .radar-header-title { color: #a97a3e; }
+:root[data-theme="light"] .radar-widget { border-color: var(--border); background: var(--surface); box-shadow: var(--card-shadow); }
+:root[data-theme="light"] .radar-header-title { color: var(--text-2); }
 :root[data-theme="light"] .radar-live-text { color: #e63946; }
-:root[data-theme="light"] .radar-ring { stroke: #ffcf94; }
-:root[data-theme="light"] .radar-axis { stroke: #ffcf94; }
-:root[data-theme="light"] .radar-axis-diag { stroke: #ffd8a3; }
-:root[data-theme="light"] .radar-outer-border { stroke: #d35400; }
+:root[data-theme="light"] .radar-ring { stroke: var(--grid); }
+:root[data-theme="light"] .radar-axis { stroke: var(--grid); }
+:root[data-theme="light"] .radar-axis-diag { stroke: var(--border); }
+:root[data-theme="light"] .radar-outer-border { stroke: var(--accent); }
 :root[data-theme="light"] .radar-sweep-glow {
-  background: conic-gradient(from 0deg, transparent 0deg, rgba(160,60,0,0.08) 30deg, rgba(160,60,0,0.22) 55deg, rgba(160,60,0,0.45) 70deg, transparent 71deg);
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(108,92,231,0.08) 30deg, rgba(108,92,231,0.2) 55deg, rgba(108,92,231,0.4) 70deg, transparent 71deg);
 }
-:root[data-theme="light"] .radar-sweep-line { stroke: #a03c00; }
-:root[data-theme="light"] .radar-sweep-glow-line { stroke: #ff6a00; }
-:root[data-theme="light"] .radar-center-dot { fill: #a03c00; }
-:root[data-theme="light"] .radar-center-ring { stroke: #a03c00; }
-:root[data-theme="light"] .radar-readout-sys { color: #a97a3e; }
-:root[data-theme="light"] .radar-readout-scan { color: #a03c00; }
-:root[data-theme="light"] .radar-readout-divider { background: #ffc27a; }
-:root[data-theme="light"] .radar-readout-stats span { color: #a97a3e; }
-:root[data-theme="light"] .radar-readout-stats b { color: #211307; }
-:root[data-theme="light"] .radar-stat-sum { color: #a03c00 !important; }
-:root[data-theme="light"] .radar-readout-status { color: #a97a3e; }
+:root[data-theme="light"] .radar-sweep-line { stroke: var(--accent); }
+:root[data-theme="light"] .radar-sweep-glow-line { stroke: var(--accent-2); }
+:root[data-theme="light"] .radar-center-dot { fill: var(--accent); }
+:root[data-theme="light"] .radar-center-ring { stroke: var(--accent); }
+:root[data-theme="light"] .radar-readout-sys { color: var(--text-2); }
+:root[data-theme="light"] .radar-readout-scan { color: var(--accent); }
+:root[data-theme="light"] .radar-readout-divider { background: var(--border); }
+:root[data-theme="light"] .radar-readout-stats span { color: var(--text-2); }
+:root[data-theme="light"] .radar-readout-stats b { color: var(--text); }
+:root[data-theme="light"] .radar-stat-sum { color: var(--accent-2) !important; }
+:root[data-theme="light"] .radar-readout-status { color: var(--text-2); }
 
-:root[data-theme="light"] .spends-group-toggle { color: #6b4a26; }
-:root[data-theme="light"] .spends-group-toggle:hover { color: #211307; }
-:root[data-theme="light"] .spends-group-arrow { color: #a03c00; }
-:root[data-theme="light"] .spends-group-meta { color: #a97a3e; }
+:root[data-theme="light"] .spends-group-toggle { color: var(--text-2); }
+:root[data-theme="light"] .spends-group-toggle:hover { color: var(--text); }
+:root[data-theme="light"] .spends-group-arrow { color: var(--accent); }
+:root[data-theme="light"] .spends-group-meta { color: var(--text-2); }
