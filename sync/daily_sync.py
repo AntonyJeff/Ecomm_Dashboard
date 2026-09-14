@@ -352,8 +352,15 @@ SF_PASSWORD        = os.environ.get('SF_PASSWORD', '')
 SF_SECURITY_TOKEN  = os.environ.get('SF_SECURITY_TOKEN', '')
 
 # Google -- individual vars (same as .env.local, no JSON file needed)
-GOOGLE_CLIENT_EMAIL = os.environ['GOOGLE_CLIENT_EMAIL']
-GOOGLE_PRIVATE_KEY  = os.environ['GOOGLE_PRIVATE_KEY'].replace('\\n', '\n')
+GOOGLE_CLIENT_EMAIL = os.environ['GOOGLE_CLIENT_EMAIL'].strip()
+# Accept either the .env.local style (one line, literal \n escapes) or a
+# secret pasted as the real multi-line PEM (actual newlines) -- the latter is
+# what you get pasting straight from Google Cloud's downloaded key, and is
+# much less likely to get mangled going through a GitHub secret text box than
+# a 1700-character single line depending on every \n surviving copy-paste.
+GOOGLE_PRIVATE_KEY = os.environ['GOOGLE_PRIVATE_KEY'].strip()
+if '\n' not in GOOGLE_PRIVATE_KEY:
+    GOOGLE_PRIVATE_KEY = GOOGLE_PRIVATE_KEY.replace('\\n', '\n')
 
 
 # -- Salesforce auth (client credentials -> username-password fallback) --------
