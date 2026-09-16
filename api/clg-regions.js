@@ -780,6 +780,7 @@ function emptySqlStageResult(regionCfg) {
   return {
     totalRecords: 0, chartMode: 'breakdown', dateAxisLabel: 'SQL Change Date',
     kpiKeys: regionCfg.kpiKeys, fixedDateRange: regionCfg.fixedDateRange || null, subSourceOrder: [], chart: [],
+    mrrTrend: [],
     table: { columns: SQL_METRIC_COLUMNS, rows: [], grandTotal: emptySqlMetrics() },
   };
 }
@@ -899,6 +900,10 @@ function buildSqlStage(rows, startTS, endTS, regionCfg) {
     tableRows[quarterRowsStart].quarterRowSpan = quarterRowSpan;
   }
 
+  // MRR trend -- one point per quarter (Sum of Product Amount(MRR) across
+  // every Source/SubSource for that quarter), for the Trends tab's MRR chart.
+  const mrrTrend = quarters.map(quarter => ({ quarter, mrr: sumSqlLineItems(byQuarter.get(quarter)).mrr }));
+
   return {
     totalRecords: items.length,
     chartMode: 'breakdown',
@@ -907,6 +912,7 @@ function buildSqlStage(rows, startTS, endTS, regionCfg) {
     fixedDateRange: regionCfg.fixedDateRange || null,
     subSourceOrder,
     chart,
+    mrrTrend,
     table: { columns: SQL_METRIC_COLUMNS, rows: tableRows, grandTotal: sumSqlLineItems(items) },
   };
 }

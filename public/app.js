@@ -362,6 +362,27 @@ function renderSqlRegion(data) {
 // renderLegend() exactly as the old per-stage tabs did; only the title logic
 // differs per stage's own chartMode (IQL/MQL are 'simple' -- one bar per
 // quarter, no legend; Leads/SQL are 'breakdown' with a two-level axis title).
+// MRR trend -- one bar per quarter (Sum of Product Amount(MRR)), shown right
+// below the SQL breakdown chart in Trends. Reuses the same bar-row/bar-track
+// markup as the "simple" IQL/MQL charts, but formatted as currency and in
+// the teal accent so it reads as a distinct, second chart rather than a
+// continuation of the SQL Source/SubSource breakdown above it.
+function renderMrrTrendChart(mrrTrend) {
+  const maxMrr = Math.max(1, ...mrrTrend.map(q => q.mrr));
+  return mrrTrend.map(({ quarter, mrr }) => `
+    <div class="quarter-group">
+      <div class="quarter-label">${escapeHtml(quarter)}</div>
+      <div class="bar-row bar-row-simple">
+        <span class="bar-track">
+          <span class="bar-fill" style="width:${Math.max(2, (mrr / maxMrr) * 100)}%; background:var(--accent-2)">
+            <span class="bar-value">${fmtCurrency(mrr)}</span>
+          </span>
+        </span>
+      </div>
+    </div>
+  `).join('');
+}
+
 const TRENDS_STAGES = [
   { key: 'lead', label: 'Leads' },
   { key: 'iql', label: 'IQL' },
@@ -395,6 +416,14 @@ function renderTrends(region) {
         </div>
         <div class="funnel-chart">${data.chart.length ? renderChart(data) : '<div class="empty">No matching records in this range.</div>'}</div>
       </div>
+      ${key === 'sql' ? `
+        <div class="funnel-chart-wrap">
+          <div class="funnel-chart-header">
+            <h3 class="chart-title">MRR Trend</h3>
+          </div>
+          <div class="funnel-chart">${data.mrrTrend && data.mrrTrend.length ? renderMrrTrendChart(data.mrrTrend) : '<div class="empty">No matching opportunities in this range.</div>'}</div>
+        </div>
+      ` : ''}
     `;
     wrap.appendChild(section);
   }
