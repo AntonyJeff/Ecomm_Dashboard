@@ -33,16 +33,25 @@ let activeStage = 'lead';
 let lastData = null;
 let viewingSpends = false;
 
-// Default view window (also what Reset returns to) -- Jun 1 to Aug 30.
-const DEFAULT_START_DATE = '2026-06-01';
-const DEFAULT_END_DATE = '2026-08-30';
+// Default view window (also what Reset returns to) -- April 1 of the current
+// fiscal year (this business's FY starts in April, matching the Q1xx/Q2xx
+// quarter labels used throughout) through today, computed fresh every time
+// the dashboard loads rather than a hardcoded date that goes stale.
+function fiscalYearStartDate() {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth(); // 0 = Jan .. 3 = Apr
+  const fyStartYear = month >= 3 ? year : year - 1;
+  return `${fyStartYear}-04-01`;
+}
+const DEFAULT_START_DATE = fiscalYearStartDate();
+const DEFAULT_END_DATE = new Date().toISOString().slice(0, 10);
 let currentStartDate = DEFAULT_START_DATE;
 let currentEndDate = DEFAULT_END_DATE;
 
-// Spends tab default -- Apr 1 to Sep 10, independent of the Leads dashboard's
-// own default above (deliberately different date per the user's request).
-const SPENDS_DEFAULT_START_DATE = '2026-04-01';
-const SPENDS_DEFAULT_END_DATE = '2026-09-10';
+// Spends tab uses the same default window as the Leads dashboard.
+const SPENDS_DEFAULT_START_DATE = DEFAULT_START_DATE;
+const SPENDS_DEFAULT_END_DATE = DEFAULT_END_DATE;
 
 const METRIC_FMT = { leadAge: fmtDec, ndl: fmtInt, count: fmtInt };
 
