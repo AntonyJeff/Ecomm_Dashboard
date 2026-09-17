@@ -26,6 +26,32 @@
     <div class="overview-boxes" id="overviewBoxes">
       <div class="bento-tile">
         <div class="bento-top">
+          <span class="bento-label">Leads + NDL</span>
+          <span class="bento-icon bento-icon-sum">
+            <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="6" height="6" rx="1" stroke="currentColor" stroke-width="2"/><rect x="11" y="11" width="6" height="6" rx="1" stroke="currentColor" stroke-width="2"/><path d="M9 6h3a2 2 0 0 1 2 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </span>
+        </div>
+        <div class="bento-value" id="overviewSum">-</div>
+        <div class="bento-caption">combined total</div>
+      </div>
+
+      <div class="bento-tile bento-tile-spends-summary" id="spendsSummaryTile">
+        <div class="bento-top">
+          <span class="bento-label">Campaigns</span>
+          <span class="bento-icon bento-icon-spends">
+            <svg viewBox="0 0 20 20" fill="none"><rect x="2" y="5" width="16" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M2 8h16" stroke="currentColor" stroke-width="2"/><circle cx="14" cy="12" r="1.4" fill="currentColor"/></svg>
+          </span>
+        </div>
+        <div class="spends-summary-rows">
+          <div class="spends-summary-row"><span>LinkedIn Spends</span><b id="overviewSpendsLinkedin">-</b></div>
+          <div class="spends-summary-row"><span>Meta Spends</span><b id="overviewSpendsMeta">-</b></div>
+          <div class="spends-summary-row spends-summary-row-total"><span>Total Spends</span><b id="overviewSpendsTotal">-</b></div>
+        </div>
+        <button type="button" class="spends-nav-btn" id="spendsBox">Navigate to Spends tab <span>&#8594;</span></button>
+      </div>
+
+      <div class="bento-tile">
+        <div class="bento-top">
           <span class="bento-label">Demo Leads</span>
           <span class="bento-icon bento-icon-leads">
             <svg viewBox="0 0 20 20" fill="none"><path d="M3 15l4-5 3 3 6-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 5h4v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -45,28 +71,6 @@
         <div class="bento-value" id="overviewNdl">-</div>
         <div class="bento-caption">non-duplicate leads</div>
       </div>
-
-      <div class="bento-tile">
-        <div class="bento-top">
-          <span class="bento-label">Leads + NDL</span>
-          <span class="bento-icon bento-icon-sum">
-            <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="6" height="6" rx="1" stroke="currentColor" stroke-width="2"/><rect x="11" y="11" width="6" height="6" rx="1" stroke="currentColor" stroke-width="2"/><path d="M9 6h3a2 2 0 0 1 2 2v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          </span>
-        </div>
-        <div class="bento-value" id="overviewSum">-</div>
-        <div class="bento-caption">combined total</div>
-      </div>
-
-      <button type="button" class="bento-tile bento-tile-action" id="spendsBox">
-        <div class="bento-top">
-          <span class="bento-label">Campaigns</span>
-          <span class="bento-icon bento-icon-spends">
-            <svg viewBox="0 0 20 20" fill="none"><rect x="2" y="5" width="16" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M2 8h16" stroke="currentColor" stroke-width="2"/><circle cx="14" cy="12" r="1.4" fill="currentColor"/></svg>
-          </span>
-        </div>
-        <div class="bento-value bento-value-action">Spends</div>
-        <div class="bento-caption">view campaign spend</div>
-      </button>
     </div>
 
     <div class="radar-widget">

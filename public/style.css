@@ -859,6 +859,49 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 .bento-caption { font-size: 13px; color: var(--muted); }
 .bento-value-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 
+/* Campaigns tile on the Leads dashboard -- a live LinkedIn/Meta spend
+   summary for the same date range as the Leads/NDL tiles beside it, plus an
+   explicit button to jump into the full Spends tab. */
+.bento-tile-spends-summary { gap: 10px; }
+.spends-summary-rows { display: flex; flex-direction: column; gap: 5px; flex: 1; justify-content: center; }
+.spends-summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.spends-summary-row b {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.spends-summary-row-total {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  margin-top: 1px;
+}
+.spends-summary-row-total b { font-size: 17px; color: var(--accent); }
+.spends-nav-btn {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.spends-nav-btn:hover { opacity: 0.88; }
+
 /* Period-over-period comparison badges -- shown on KPI tiles and per-row/
    per-column in the Spends campaign table when the user has toggled
    "Compare with previous X" for a detected 7-day/2-week/1-month/3-month

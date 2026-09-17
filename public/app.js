@@ -468,6 +468,27 @@ function renderOverview() {
   document.getElementById('overviewSum').textContent = fmtInt(lead.totalRecords + lead.totalNDL);
 }
 
+// ---- Campaigns tile: a live LinkedIn/Meta spend summary for the same
+// [currentStartDate, currentEndDate] window and active region as the
+// Leads/NDL tiles beside it -- fetched from /api/clg-spends alongside the
+// Leads data in load() below, not a separate date range. ----
+let overviewSpendsData = null;
+function renderOverviewSpends() {
+  const linkedinEl = document.getElementById('overviewSpendsLinkedin');
+  const metaEl = document.getElementById('overviewSpendsMeta');
+  const totalEl = document.getElementById('overviewSpendsTotal');
+  if (!overviewSpendsData || !overviewSpendsData.regions[activeRegion]) {
+    linkedinEl.textContent = metaEl.textContent = totalEl.textContent = '-';
+    return;
+  }
+  const regionData = overviewSpendsData.regions[activeRegion];
+  const linkedinSpend = regionData.linkedin.kpi.spend;
+  const metaSpend = regionData.meta.kpi.spend;
+  linkedinEl.textContent = fmtCurrency(linkedinSpend);
+  metaEl.textContent = fmtCurrency(metaSpend);
+  totalEl.textContent = fmtCurrency(linkedinSpend + metaSpend);
+}
+
 // ---- Region filter: donut (equal-share wedges -- a filter, not a volume
 // chart) + legend. ----
 function renderDonut() {
@@ -714,13 +735,18 @@ async function load() {
 
   status.textContent = 'Loading...';
   try {
-    const res = await fetch(`/api/clg-regions?startDate=${currentStartDate}&endDate=${currentEndDate}`);
+    const [res, spendsRes] = await Promise.all([
+      fetch(`/api/clg-regions?startDate=${currentStartDate}&endDate=${currentEndDate}`),
+      fetch(`/api/clg-spends?startDate=${currentStartDate}&endDate=${currentEndDate}`),
+    ]);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Request failed');
 
     lastData = data;
+    overviewSpendsData = spendsRes.ok ? await spendsRes.json() : null;
     render();
     renderOverview();
+    renderOverviewSpends();
     renderDonut();
     renderRegionLegend();
     renderRadar();
@@ -736,6 +762,7 @@ function selectRegion(regionKey) {
   showSpends(false);
   render();
   renderOverview();
+  renderOverviewSpends();
   renderDonut();
   renderRegionLegend();
   renderRadar();
