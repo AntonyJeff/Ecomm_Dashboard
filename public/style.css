@@ -52,6 +52,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 20px 24px 0;
 }
@@ -60,6 +61,67 @@ body {
 .muted { color: var(--muted); font-size: 13px; }
 
 .topbar-actions { display: flex; align-items: center; gap: 12px; }
+
+/* Dashboard controls (region + date range) live in the topbar, beside the
+   title, instead of the old always-open calendar/donut cards taking up a
+   full row -- freeing that space for the Funnel View/Spends table below. */
+.dashboard-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.region-select {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 30px 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5 8l5 5 5-5' stroke='%2394a3b8' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center;
+  background-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.region-select:hover { border-color: var(--accent); }
+
+.date-range-control { position: relative; }
+.date-range-trigger {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.date-range-trigger:hover { border-color: var(--accent); }
+.date-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 80;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+}
+.date-popover.calendar-card { flex: none; }
+
+/* Placeholder shown in the Funnel View / Trends tab when "All Regions" is
+   selected -- see the comment in render() for why the detailed breakdown
+   isn't merged across regions. */
+.all-regions-notice {
+  margin: 24px;
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+}
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -103,12 +165,6 @@ body {
   100% { box-shadow: 0 0 0 0 rgba(27, 175, 122, 0); }
 }
 
-.secondary-row {
-  display: flex;
-  align-items: stretch;
-  gap: 16px;
-  padding: 20px 24px 0;
-}
 /* Calendar + region filter cards use a fixed dark indigo palette (matching
    the approved reference design) rather than the page's light/dark theme
    tokens -- this widget is meant to look the same regardless of theme. */
@@ -289,73 +345,6 @@ body {
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes glowPulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
-
-/* Region filter card -- equal-share donut (a filter, not a volume chart) +
-   legend, restyled onto the same dark indigo palette as the calendar card. */
-.region-filter-card {
-  flex: 1 1 280px;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid #334155;
-  border-radius: 12px;
-  background: rgba(30, 41, 59, 0.5);
-  padding: 16px 20px;
-}
-.region-filter-card-header {
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #94a3b8;
-  margin-bottom: 16px;
-}
-.region-filter-row {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 24px;
-}
-.donut-wrap { position: relative; width: 120px; height: 120px; flex: none; }
-.region-donut { width: 100%; height: 100%; transform: rotate(-90deg); cursor: pointer; overflow: visible; }
-.region-donut circle { transition: opacity 0.15s ease, stroke-width 0.15s ease, filter 0.15s ease; }
-.region-donut .donut-seg-dim { opacity: 0.45; }
-.region-donut .donut-seg-active { filter: drop-shadow(0 0 3px currentColor); }
-.donut-center {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
-  color: #fff;
-  pointer-events: none;
-}
-.donut-legend {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 20px;
-}
-.donut-legend li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #94a3b8;
-  cursor: pointer;
-}
-.donut-legend li.active { color: #fff; }
-.donut-legend .swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex: none;
-}
 
 .status-line { display: block; min-height: 17px; }
 
@@ -1169,11 +1158,6 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 :root[data-theme="light"] .calendar-day-selected { background: linear-gradient(135deg, var(--accent) 0%, var(--accent-pink) 100%); color: #fff; }
 :root[data-theme="light"] .calendar-day-pending { background: var(--accent); color: #fff; }
 :root[data-theme="light"] .calendar-day-in-range { background: rgba(108, 92, 231, 0.16); color: var(--accent); }
-
-:root[data-theme="light"] .region-filter-card { border-color: var(--border); background: var(--surface); box-shadow: var(--card-shadow); }
-:root[data-theme="light"] .region-filter-card-header { color: var(--text-2); }
-:root[data-theme="light"] .donut-legend li { color: var(--text-2); }
-:root[data-theme="light"] .donut-legend li.active { color: var(--text); }
 
 :root[data-theme="light"] .pivot-wrap { border-color: var(--border); background: var(--surface); box-shadow: var(--card-shadow); }
 :root[data-theme="light"] .pivot-wrap h3 { color: var(--text-2); }

@@ -456,6 +456,18 @@ function render() {
   if (!lastData) return;
   const app = document.getElementById('app');
   app.innerHTML = '';
+  // "All Regions" combines cleanly for the KPI tiles/charts up top (plain
+  // sums), but each region's Salesforce report genuinely differs in shape
+  // below that -- different pivot fields (Owner Team vs Lead Source), SEA/EU's
+  // SQL using a fixed prior-FY window instead of the picker, etc (see
+  // api/clg-regions.js). Rather than silently merge mismatched dimensions
+  // into a misleading table, both detailed tabs ask the user to pick one
+  // region instead.
+  if (activeRegion === 'All') {
+    app.innerHTML = '<div class="all-regions-notice">Select a specific region above to view its detailed breakdown.</div>';
+    animateViewIn(app);
+    return;
+  }
   if (activeStage === 'trends') {
     app.appendChild(renderTrends(activeRegion));
     animateViewIn(app);
@@ -466,71 +478,58 @@ function render() {
   animateViewIn(app);
 }
 
-// ---- Overview boxes: Leads / Total NDL / Leads+NDL for the active region,
-// always read off that region's Leads-stage totals regardless of which
-// stage tab is currently open. ----
+// ---- Overview boxes: Leads / Total NDL / Leads+NDL, for the active region or
+// summed across all 4 when "All Regions" is selected -- always read off the
+// Leads-stage totals regardless of which stage tab is currently open. ----
 function renderOverview() {
   if (!lastData) return;
-  const lead = lastData.regions[activeRegion].lead;
-  document.getElementById('overviewLeads').textContent = fmtInt(lead.totalRecords);
-  document.getElementById('overviewNdl').textContent = fmtInt(lead.totalNDL);
-  document.getElementById('overviewSum').textContent = fmtInt(lead.totalRecords + lead.totalNDL);
+  const regionsToSum = activeRegion === 'All' ? REGIONS.map(r => r.key) : [activeRegion];
+  let totalRecords = 0, totalNDL = 0;
+  for (const region of regionsToSum) {
+    const lead = lastData.regions[region].lead;
+    totalRecords += lead.totalRecords;
+    totalNDL += lead.totalNDL;
+  }
+  document.getElementById('overviewLeads').textContent = fmtInt(totalRecords);
+  document.getElementById('overviewNdl').textContent = fmtInt(totalNDL);
+  document.getElementById('overviewSum').textContent = fmtInt(totalRecords + totalNDL);
 }
 
 // ---- Campaigns tile: a live LinkedIn/Meta spend summary for the same
-// [currentStartDate, currentEndDate] window and active region as the
-// Leads/NDL tiles beside it -- fetched from /api/clg-spends alongside the
-// Leads data in load() below, not a separate date range. ----
+// [currentStartDate, currentEndDate] window and active region (or all 4
+// summed, for "All Regions") as the Leads/NDL tiles beside it -- fetched from
+// /api/clg-spends alongside the Leads data in load() below, not a separate
+// date range. ----
 let overviewSpendsData = null;
 function renderOverviewSpends() {
   const linkedinEl = document.getElementById('overviewSpendsLinkedin');
   const metaEl = document.getElementById('overviewSpendsMeta');
   const totalEl = document.getElementById('overviewSpendsTotal');
-  if (!overviewSpendsData || !overviewSpendsData.regions[activeRegion]) {
+  if (!overviewSpendsData) {
     linkedinEl.textContent = metaEl.textContent = totalEl.textContent = '-';
     return;
   }
-  const regionData = overviewSpendsData.regions[activeRegion];
-  const linkedinSpend = regionData.linkedin.kpi.spend;
-  const metaSpend = regionData.meta.kpi.spend;
+  const regionsToSum = activeRegion === 'All' ? REGIONS.map(r => r.key) : [activeRegion];
+  let linkedinSpend = 0, metaSpend = 0;
+  for (const region of regionsToSum) {
+    const regionData = overviewSpendsData.regions[region];
+    if (!regionData) continue;
+    linkedinSpend += regionData.linkedin.kpi.spend;
+    metaSpend += regionData.meta.kpi.spend;
+  }
   linkedinEl.textContent = fmtCurrency(linkedinSpend);
   metaEl.textContent = fmtCurrency(metaSpend);
   totalEl.textContent = fmtCurrency(linkedinSpend + metaSpend);
 }
 
-// ---- Region filter: donut (equal-share wedges -- a filter, not a volume
-// chart) + legend. ----
-function renderDonut() {
-  const svg = document.getElementById('regionDonut');
-
-  const r = 15.915; // circumference ~= 100, so percentages map directly to dasharray
-  const share = 100 / REGIONS.length;
-  const gap = 1.6; // visible thin divider between adjacent wedges
-  const segLen = share - gap;
-
-  let offset = 0;
-  const circles = REGIONS.map(region => {
-    const isActive = activeRegion === region.key;
-    const cls = `donut-seg${isActive ? ' donut-seg-active' : ' donut-seg-dim'}`;
-    const strokeWidth = isActive ? 8 : 6;
-    const circle = `<circle class="${cls}" cx="21" cy="21" r="${r}" fill="none"
-      stroke="${region.color}" stroke-width="${strokeWidth}" style="color:${region.color}"
-      stroke-dasharray="${segLen} ${100 - segLen}" stroke-dashoffset="${-offset}" data-region="${region.key}" />`;
-    offset += share;
-    return circle;
-  });
-  svg.innerHTML = circles.join('');
-  document.getElementById('donutCenterLabel').textContent = activeRegion;
-}
-
-function renderRegionLegend() {
-  const legend = document.getElementById('regionLegend');
-  legend.innerHTML = REGIONS.map(region => `
-    <li data-region="${region.key}" class="${activeRegion === region.key ? 'active' : ''}">
-      <span class="swatch" style="background:${region.color}"></span>
-      ${escapeHtml(region.key)}
-    </li>
-  `).join('');
+// ---- Region filter: a compact dropdown in the topbar (replaces the old
+// donut+legend widget) -- static option list since the Leads dashboard only
+// ever has India/SEA/EU/LATAM data, plus "All Regions". ----
+function populateRegionSelectLeads() {
+  const sel = document.getElementById('regionSelectLeads');
+  sel.innerHTML = ['All', ...REGIONS.map(r => r.key)]
+    .map(key => `<option value="${key}">${key === 'All' ? 'All Regions' : escapeHtml(key)}</option>`).join('');
+  sel.value = activeRegion;
 }
 
 // ---- Radar widget: purely illustrative "live tracker" -- blip count scales
@@ -548,7 +547,14 @@ function radarToXY(deg, r) {
 }
 
 function renderRadar() {
-  const lead = lastData ? lastData.regions[activeRegion].lead : { totalRecords: 0, totalNDL: 0 };
+  let lead = { totalRecords: 0, totalNDL: 0 };
+  if (lastData) {
+    const regionsToSum = activeRegion === 'All' ? REGIONS.map(r => r.key) : [activeRegion];
+    for (const region of regionsToSum) {
+      lead.totalRecords += lastData.regions[region].lead.totalRecords;
+      lead.totalNDL += lastData.regions[region].lead.totalNDL;
+    }
+  }
   const count = lead.totalRecords;
   const blipCount = Math.max(1, Math.min(RADAR_BLIP_SLOTS.length, Math.ceil(count / 20)));
   const g = document.getElementById('radarBlips');
@@ -605,6 +611,7 @@ let calendarViewDate = new Date(currentEndDate + 'T00:00:00Z');
 function renderCalendarHeader() {
   document.getElementById('calendarMonthLabel').textContent = CALENDAR_MONTH_FMT.format(calendarViewDate).toUpperCase();
   document.getElementById('dateRangeBtn').classList.toggle('active', selectionMode === 'range');
+  document.getElementById('dateRangeTriggerLabelLeads').textContent = formatDateRangeLabel(currentStartDate, currentEndDate);
 
   const hasRange = hasExplicitSelection && currentStartDate !== currentEndDate;
 
@@ -688,6 +695,7 @@ function handleDayClick(dateStr) {
   renderCalendar();
   pulseScale(document.querySelector('#calendarGrid .calendar-day-selected, #calendarGrid .calendar-day-pending'));
   load();
+  closeAllDatePopovers();
 }
 
 function resetDateRange() {
@@ -699,6 +707,7 @@ function resetDateRange() {
   calendarViewDate = new Date(currentEndDate + 'T00:00:00Z');
   renderCalendar();
   load();
+  closeAllDatePopovers();
 }
 
 // ---- Quick-range presets (7/14/30/60/90 days ending today) -- same idea as
@@ -723,6 +732,7 @@ function applyQuickRange(days) {
   calendarViewDate = new Date(currentEndDate + 'T00:00:00Z');
   renderCalendar();
   load();
+  closeAllDatePopovers();
 }
 
 function showSpends(show) {
@@ -731,6 +741,9 @@ function showSpends(show) {
   const leadsEl = document.getElementById('leadsView');
   spendsEl.classList.toggle('hidden', !show);
   leadsEl.classList.toggle('hidden', show);
+  document.getElementById('spendsControls').classList.toggle('hidden', !show);
+  document.getElementById('leadsControls').classList.toggle('hidden', show);
+  closeAllDatePopovers();
   animateViewIn(show ? spendsEl : leadsEl, 18);
   smoothScrollTop();
   if (show) {
@@ -756,8 +769,6 @@ async function load() {
     render();
     renderOverview();
     renderOverviewSpends();
-    renderDonut();
-    renderRegionLegend();
     renderRadar();
     document.getElementById('lastUpdated').textContent = 'Updated ' + new Date(data.lastUpdated).toLocaleString();
     status.textContent = '';
@@ -768,12 +779,11 @@ async function load() {
 
 function selectRegion(regionKey) {
   activeRegion = regionKey;
+  document.getElementById('regionSelectLeads').value = regionKey;
   showSpends(false);
   render();
   renderOverview();
   renderOverviewSpends();
-  renderDonut();
-  renderRegionLegend();
   renderRadar();
   smoothScrollTop();
 }
@@ -804,17 +814,45 @@ document.getElementById('quickRangeRow').addEventListener('click', (e) => {
   applyQuickRange(parseInt(btn.dataset.days, 10));
 });
 
-document.getElementById('regionDonut').addEventListener('click', (e) => {
-  const seg = e.target.closest('[data-region]');
-  if (!seg) return;
-  selectRegion(seg.dataset.region);
+// ---- Date-range popover -- a LinkedIn/Meta-Ads-Campaign-Manager-style
+// compact trigger button in the topbar that opens the (unchanged) calendar
+// card as a floating panel instead of it sitting permanently on the page.
+// Only one Leads/Spends popover is ever open at a time; a selection that
+// fully resolves a date (single day, or the 2nd click of a range, or a quick
+// preset) closes it automatically -- picking just the start of a range
+// leaves it open so the user can then click the end date. ----
+function closeAllDatePopovers() {
+  document.querySelectorAll('.date-popover').forEach(p => p.classList.add('hidden'));
+}
+function toggleDatePopover(id) {
+  const el = document.getElementById(id);
+  const wasHidden = el.classList.contains('hidden');
+  closeAllDatePopovers();
+  if (wasHidden) el.classList.remove('hidden');
+}
+document.getElementById('dateRangeTriggerLeads').addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleDatePopover('datePopoverLeads');
+});
+document.getElementById('dateRangeTriggerSpends').addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleDatePopover('datePopoverSpends');
+});
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.date-range-control')) return;
+  closeAllDatePopovers();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeAllDatePopovers();
 });
 
-document.getElementById('regionLegend').addEventListener('click', (e) => {
-  const item = e.target.closest('[data-region]');
-  if (!item) return;
-  selectRegion(item.dataset.region);
-});
+function formatDateRangeLabel(start, end) {
+  return start === end
+    ? DATE_LABEL_FMT.format(new Date(start + 'T00:00:00Z'))
+    : `${RANGE_DATE_FMT.format(new Date(start + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(end + 'T00:00:00Z'))}`;
+}
+
+document.getElementById('regionSelectLeads').addEventListener('change', (e) => selectRegion(e.target.value));
 
 document.getElementById('spendsBox').addEventListener('click', () => showSpends(true));
 document.getElementById('spendsBackBtn').addEventListener('click', () => showSpends(false));
@@ -943,7 +981,7 @@ function deltaBadgeHtml(curr, prev) {
 
 function spendsGetPrevChannelData() {
   if (!spendsCompareEnabled || !spendsPrevData) return null;
-  return spendsPrevData.regions[spendsActiveRegion][spendsActiveChannel];
+  return spendsGetChannelData(spendsPrevData, spendsActiveRegion, spendsActiveChannel);
 }
 
 function spendsUpdateCompareToggle() {
@@ -989,6 +1027,7 @@ function spendsUpdateRangeLabel() {
 function spendsRenderCalendarHeader() {
   document.getElementById('spendsCalendarMonthLabel').textContent = CALENDAR_MONTH_FMT.format(spendsCalendarViewDate).toUpperCase();
   document.getElementById('spendsDateRangeBtn').classList.toggle('active', spendsSelectionMode === 'range');
+  document.getElementById('dateRangeTriggerLabelSpends').textContent = formatDateRangeLabel(spendsStartDate, spendsEndDate);
 
   const hasRange = spendsHasExplicitSelection && spendsStartDate !== spendsEndDate;
   const rangePill = document.getElementById('spendsCalendarRangePill');
@@ -1070,6 +1109,7 @@ function spendsHandleDayClick(dateStr) {
   spendsRenderCalendar();
   pulseScale(document.querySelector('#spendsCalendarGrid .calendar-day-selected, #spendsCalendarGrid .calendar-day-pending'));
   spendsLoad();
+  closeAllDatePopovers();
 }
 
 function spendsResetDateRange() {
@@ -1081,46 +1121,70 @@ function spendsResetDateRange() {
   spendsCalendarViewDate = new Date(spendsEndDate + 'T00:00:00Z');
   spendsRenderCalendar();
   spendsLoad();
+  closeAllDatePopovers();
 }
 
-function spendsRenderDonut() {
-  const svg = document.getElementById('spendsRegionDonut');
-  const r = 15.915;
-  const regionsForChannel = spendsRegionsForChannel();
-  const share = 100 / regionsForChannel.length;
-  const gap = 1.6;
-  const segLen = share - gap;
-
-  let offset = 0;
-  const circles = regionsForChannel.map(region => {
-    const isActive = spendsActiveRegion === region.key;
-    const cls = `donut-seg${isActive ? ' donut-seg-active' : ' donut-seg-dim'}`;
-    const strokeWidth = isActive ? 8 : 6;
-    const circle = `<circle class="${cls}" cx="21" cy="21" r="${r}" fill="none"
-      stroke="${region.color}" stroke-width="${strokeWidth}" style="color:${region.color}"
-      stroke-dasharray="${segLen} ${100 - segLen}" stroke-dashoffset="${-offset}" data-region="${region.key}" />`;
-    offset += share;
-    return circle;
-  });
-  svg.innerHTML = circles.join('');
-  document.getElementById('spendsDonutCenterLabel').textContent = spendsActiveRegion;
-}
-
-function spendsRenderRegionLegend() {
-  const legend = document.getElementById('spendsRegionLegend');
-  legend.innerHTML = spendsRegionsForChannel().map(region => `
-    <li data-region="${region.key}" class="${spendsActiveRegion === region.key ? 'active' : ''}">
-      <span class="swatch" style="background:${region.color}"></span>
-      ${escapeHtml(region.key)}
-    </li>
-  `).join('');
+// ---- Region filter: a compact dropdown (replaces the old donut+legend
+// widget), rebuilt whenever the active channel changes since Email/WhatsApp
+// carry an extra MEA region LinkedIn/Meta Ads don't have (see
+// SPENDS_MESSAGING_REGIONS) -- plus "All Regions". ----
+function spendsPopulateRegionSelect() {
+  const sel = document.getElementById('regionSelectSpends');
+  const options = ['All', ...spendsRegionsForChannel().map(r => r.key)];
+  sel.innerHTML = options.map(key => `<option value="${key}">${key === 'All' ? 'All Regions' : escapeHtml(key)}</option>`).join('');
+  if (!options.includes(spendsActiveRegion)) spendsActiveRegion = 'All';
+  sel.value = spendsActiveRegion;
 }
 
 function spendsSelectRegion(regionKey) {
   spendsActiveRegion = regionKey;
-  spendsRenderDonut();
-  spendsRenderRegionLegend();
+  document.getElementById('regionSelectSpends').value = regionKey;
   spendsRender();
+}
+
+// ---- "All Regions" aggregation (Spends tab only -- every region's channel
+// data shares the exact same shape, unlike the Leads dashboard's per-region
+// report structures, so this is a safe plain sum). Raw counts are summed
+// then rates/percentages are RE-DERIVED from those sums, matching the same
+// "never average derived rates" rule api/clg-spends.js already follows. ----
+function spendsDeriveRatesClient(t) {
+  const ctr = t.impressions > 0 ? (t.clicks / t.impressions) * 100 : 0;
+  const cpm = t.impressions > 0 ? (t.spend / t.impressions) * 1000 : 0;
+  const cpc = t.clicks > 0 ? t.spend / t.clicks : 0;
+  return { ...t, ctr, cpm, cpc };
+}
+function spendsDeriveMessagingRatesClient(t) {
+  const deliveredPct = t.sent > 0 ? (t.delivered / t.sent) * 100 : 0;
+  const uniqueOpenedPct = t.delivered > 0 ? (t.uniqueOpened / t.delivered) * 100 : 0;
+  const uniqueClickedPct = t.delivered > 0 ? (t.uniqueClicked / t.delivered) * 100 : 0;
+  return { ...t, deliveredPct, uniqueOpenedPct, uniqueClickedPct };
+}
+function spendsAggregateChannel(dataset, channel) {
+  const isMsg = MESSAGING_CHANNELS.has(channel);
+  const regions = (isMsg ? SPENDS_MESSAGING_REGIONS : REGIONS).map(r => r.key);
+  const totalKeys = isMsg
+    ? ['sent', 'delivered', 'totalOpened', 'uniqueOpened', 'totalClicked', 'uniqueClicked']
+    : ['spend', 'clicks', 'impressions'];
+  const totals = {};
+  totalKeys.forEach(k => { totals[k] = 0; });
+  const campaigns = [];
+  for (const region of regions) {
+    const regionData = dataset.regions[region];
+    if (!regionData) continue;
+    const channelData = regionData[channel];
+    campaigns.push(...channelData.campaigns);
+    for (const k of totalKeys) totals[k] += channelData.kpi[k] || 0;
+  }
+  const kpi = isMsg ? spendsDeriveMessagingRatesClient(totals) : spendsDeriveRatesClient(totals);
+  campaigns.sort((a, b) => isMsg ? b.sent - a.sent : b.spend - a.spend);
+  return { kpi, campaigns };
+}
+// Resolves the channel data to render, whether that's one region's own
+// response or the "All Regions" aggregate above -- every call site that used
+// to read `dataset.regions[region][channel]` directly now goes through here.
+function spendsGetChannelData(dataset, region, channel) {
+  if (!dataset) return null;
+  return region === 'All' ? spendsAggregateChannel(dataset, channel) : dataset.regions[region][channel];
 }
 
 const SPENDS_RADAR_MESSAGES = [
@@ -1208,7 +1272,7 @@ function spendsToggleGroup() {
 
 function spendsRenderTable() {
   if (!spendsLastData) return;
-  const channelData = spendsLastData.regions[spendsActiveRegion][spendsActiveChannel];
+  const channelData = spendsGetChannelData(spendsLastData, spendsActiveRegion, spendsActiveChannel);
   const campaigns = channelData.campaigns;
   const kpi = channelData.kpi;
   const prevChannelData = spendsGetPrevChannelData();
@@ -1265,7 +1329,7 @@ function spendsSetKpiDelta(elId, curr, prev) {
 
 function spendsRender() {
   if (!spendsLastData) return;
-  const channelData = spendsLastData.regions[spendsActiveRegion][spendsActiveChannel];
+  const channelData = spendsGetChannelData(spendsLastData, spendsActiveRegion, spendsActiveChannel);
   const kpi = channelData.kpi;
   const prevChannelData = spendsGetPrevChannelData();
   const prevKpi = prevChannelData ? prevChannelData.kpi : null;
@@ -1293,8 +1357,6 @@ async function spendsLoad() {
 
     spendsLastData = data;
     await spendsFetchPrevIfNeeded();
-    spendsRenderDonut();
-    spendsRenderRegionLegend();
     spendsRender();
     status.textContent = '';
   } catch (err) {
@@ -1322,16 +1384,7 @@ document.getElementById('spendsCalendarGrid').addEventListener('click', (e) => {
   spendsHandleDayClick(btn.dataset.date);
 });
 
-document.getElementById('spendsRegionDonut').addEventListener('click', (e) => {
-  const seg = e.target.closest('[data-region]');
-  if (!seg) return;
-  spendsSelectRegion(seg.dataset.region);
-});
-document.getElementById('spendsRegionLegend').addEventListener('click', (e) => {
-  const item = e.target.closest('[data-region]');
-  if (!item) return;
-  spendsSelectRegion(item.dataset.region);
-});
+document.getElementById('regionSelectSpends').addEventListener('change', (e) => spendsSelectRegion(e.target.value));
 
 document.getElementById('spendsChannelTabs').addEventListener('click', (e) => {
   // The compare-toggle/close buttons also live in this nav but aren't
@@ -1345,10 +1398,9 @@ document.getElementById('spendsChannelTabs').addEventListener('click', (e) => {
   pulseScale(btn);
   // MEA only exists for Email/WhatsApp -- bounce back to India rather than
   // showing an empty region if the user had MEA selected and switched to a
-  // paid channel.
+  // paid channel. "All Regions" stays valid either way.
   if (!spendsIsMessaging() && spendsActiveRegion === 'MEA') spendsActiveRegion = 'India';
-  spendsRenderDonut();
-  spendsRenderRegionLegend();
+  spendsPopulateRegionSelect();
   spendsRender();
 });
 
@@ -1406,6 +1458,7 @@ function spendsApplyQuickRange(days) {
   spendsCalendarViewDate = new Date(spendsEndDate + 'T00:00:00Z');
   spendsRenderCalendar();
   spendsLoad();
+  closeAllDatePopovers();
 }
 
 document.getElementById('spendsQuickRangeRow').addEventListener('click', (e) => {
@@ -1415,5 +1468,7 @@ document.getElementById('spendsQuickRangeRow').addEventListener('click', (e) => 
   spendsApplyQuickRange(parseInt(btn.dataset.days, 10));
 });
 
+populateRegionSelectLeads();
+spendsPopulateRegionSelect();
 renderCalendar();
 load();

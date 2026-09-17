@@ -12,6 +12,89 @@
       <h1>Ecomm Dashboard</h1>
       <span id="lastUpdated" class="muted"></span>
     </div>
+
+    <div class="dashboard-controls" id="leadsControls">
+      <select class="region-select" id="regionSelectLeads" aria-label="Region filter"></select>
+      <div class="date-range-control">
+        <button type="button" class="date-range-trigger" id="dateRangeTriggerLeads">
+          <span>&#128197;</span> <span id="dateRangeTriggerLabelLeads">-</span>
+        </button>
+        <div class="calendar-card date-popover hidden" id="datePopoverLeads">
+          <div class="calendar-card-header">
+            <div class="calendar-card-heading">
+              <button type="button" class="calendar-nav-btn" id="calendarPrevBtn" aria-label="Previous month">&#8249;</button>
+              <span class="calendar-month-label" id="calendarMonthLabel"></span>
+              <button type="button" class="calendar-nav-btn" id="calendarNextBtn" aria-label="Next month">&#8250;</button>
+              <span class="calendar-range-pill hidden" id="calendarRangePill"></span>
+            </div>
+            <div class="calendar-card-actions">
+              <span class="date-range-value hidden" id="dateRangeValue"></span>
+              <button type="button" class="date-range-btn" id="dateRangeBtn">
+                <span>&#8660;</span> Date Range
+              </button>
+              <button type="button" class="calendar-reset-btn hidden" id="calendarResetBtn">
+                &#10005; Reset
+              </button>
+            </div>
+          </div>
+          <div class="quick-range-row" id="quickRangeRow">
+            <button type="button" class="quick-range-btn" data-days="7">7D</button>
+            <button type="button" class="quick-range-btn" data-days="14">14D</button>
+            <button type="button" class="quick-range-btn" data-days="30">30D</button>
+            <button type="button" class="quick-range-btn" data-days="60">60D</button>
+            <button type="button" class="quick-range-btn" data-days="90">90D</button>
+          </div>
+          <p class="calendar-helper-text hidden" id="calendarHelperText">Click a start date, then click an end date</p>
+          <div class="calendar-weekdays">
+            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+          </div>
+          <div class="calendar-grid" id="calendarGrid"></div>
+          <span id="status" class="muted status-line"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="dashboard-controls hidden" id="spendsControls">
+      <select class="region-select" id="regionSelectSpends" aria-label="Region filter"></select>
+      <div class="date-range-control">
+        <button type="button" class="date-range-trigger" id="dateRangeTriggerSpends">
+          <span>&#128197;</span> <span id="dateRangeTriggerLabelSpends">-</span>
+        </button>
+        <div class="calendar-card date-popover hidden" id="datePopoverSpends">
+          <div class="calendar-card-header">
+            <div class="calendar-card-heading">
+              <button type="button" class="calendar-nav-btn" id="spendsCalendarPrevBtn" aria-label="Previous month">&#8249;</button>
+              <span class="calendar-month-label" id="spendsCalendarMonthLabel"></span>
+              <button type="button" class="calendar-nav-btn" id="spendsCalendarNextBtn" aria-label="Next month">&#8250;</button>
+              <span class="calendar-range-pill hidden" id="spendsCalendarRangePill"></span>
+            </div>
+            <div class="calendar-card-actions">
+              <span class="date-range-value hidden" id="spendsDateRangeValue"></span>
+              <button type="button" class="date-range-btn" id="spendsDateRangeBtn">
+                <span>&#8660;</span> Date Range
+              </button>
+              <button type="button" class="calendar-reset-btn hidden" id="spendsCalendarResetBtn">
+                &#10005; Reset
+              </button>
+            </div>
+          </div>
+          <div class="quick-range-row" id="spendsQuickRangeRow">
+            <button type="button" class="quick-range-btn" data-days="7">7D</button>
+            <button type="button" class="quick-range-btn" data-days="14">14D</button>
+            <button type="button" class="quick-range-btn" data-days="30">30D</button>
+            <button type="button" class="quick-range-btn" data-days="60">60D</button>
+            <button type="button" class="quick-range-btn" data-days="90">90D</button>
+          </div>
+          <p class="calendar-helper-text hidden" id="spendsCalendarHelperText">Click a start date, then click an end date</p>
+          <div class="calendar-weekdays">
+            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+          </div>
+          <div class="calendar-grid" id="spendsCalendarGrid"></div>
+          <span id="spendsStatus" class="muted status-line"></span>
+        </div>
+      </div>
+    </div>
+
     <div class="topbar-actions">
       <button type="button" id="themeToggle" class="theme-toggle" title="Switch theme" aria-label="Switch theme">
         <span class="theme-toggle-icon" id="themeToggleIcon">&#9728;&#65039;</span>
@@ -125,52 +208,6 @@
             <div id="radarWindow">&#9654; SCAN WINDOW: --</div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="secondary-row">
-    <div class="calendar-card">
-      <div class="calendar-card-header">
-        <div class="calendar-card-heading">
-          <button type="button" class="calendar-nav-btn" id="calendarPrevBtn" aria-label="Previous month">&#8249;</button>
-          <span class="calendar-month-label" id="calendarMonthLabel"></span>
-          <button type="button" class="calendar-nav-btn" id="calendarNextBtn" aria-label="Next month">&#8250;</button>
-          <span class="calendar-range-pill hidden" id="calendarRangePill"></span>
-        </div>
-        <div class="calendar-card-actions">
-          <span class="date-range-value hidden" id="dateRangeValue"></span>
-          <button type="button" class="date-range-btn" id="dateRangeBtn">
-            <span>&#8660;</span> Date Range
-          </button>
-          <button type="button" class="calendar-reset-btn hidden" id="calendarResetBtn">
-            &#10005; Reset
-          </button>
-        </div>
-      </div>
-      <div class="quick-range-row" id="quickRangeRow">
-        <button type="button" class="quick-range-btn" data-days="7">7D</button>
-        <button type="button" class="quick-range-btn" data-days="14">14D</button>
-        <button type="button" class="quick-range-btn" data-days="30">30D</button>
-        <button type="button" class="quick-range-btn" data-days="60">60D</button>
-        <button type="button" class="quick-range-btn" data-days="90">90D</button>
-      </div>
-      <p class="calendar-helper-text hidden" id="calendarHelperText">Click a start date, then click an end date</p>
-      <div class="calendar-weekdays">
-        <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
-      </div>
-      <div class="calendar-grid" id="calendarGrid"></div>
-      <span id="status" class="muted status-line"></span>
-    </div>
-
-    <div class="region-filter-card">
-      <div class="region-filter-card-header">Region Filter</div>
-      <div class="region-filter-row">
-        <div class="donut-wrap">
-          <svg viewBox="0 0 42 42" class="region-donut" id="regionDonut"></svg>
-          <div class="donut-center" id="donutCenterLabel">ALL</div>
-        </div>
-        <ul class="donut-legend" id="regionLegend"></ul>
       </div>
     </div>
   </div>
@@ -297,52 +334,6 @@
               <div id="spendsRadarWindow">&#9654; SCAN WINDOW: --</div>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="secondary-row">
-      <div class="calendar-card">
-        <div class="calendar-card-header">
-          <div class="calendar-card-heading">
-            <button type="button" class="calendar-nav-btn" id="spendsCalendarPrevBtn" aria-label="Previous month">&#8249;</button>
-            <span class="calendar-month-label" id="spendsCalendarMonthLabel"></span>
-            <button type="button" class="calendar-nav-btn" id="spendsCalendarNextBtn" aria-label="Next month">&#8250;</button>
-            <span class="calendar-range-pill hidden" id="spendsCalendarRangePill"></span>
-          </div>
-          <div class="calendar-card-actions">
-            <span class="date-range-value hidden" id="spendsDateRangeValue"></span>
-            <button type="button" class="date-range-btn" id="spendsDateRangeBtn">
-              <span>&#8660;</span> Date Range
-            </button>
-            <button type="button" class="calendar-reset-btn hidden" id="spendsCalendarResetBtn">
-              &#10005; Reset
-            </button>
-          </div>
-        </div>
-        <div class="quick-range-row" id="spendsQuickRangeRow">
-          <button type="button" class="quick-range-btn" data-days="7">7D</button>
-          <button type="button" class="quick-range-btn" data-days="14">14D</button>
-          <button type="button" class="quick-range-btn" data-days="30">30D</button>
-          <button type="button" class="quick-range-btn" data-days="60">60D</button>
-          <button type="button" class="quick-range-btn" data-days="90">90D</button>
-        </div>
-        <p class="calendar-helper-text hidden" id="spendsCalendarHelperText">Click a start date, then click an end date</p>
-        <div class="calendar-weekdays">
-          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
-        </div>
-        <div class="calendar-grid" id="spendsCalendarGrid"></div>
-        <span id="spendsStatus" class="muted status-line"></span>
-      </div>
-
-      <div class="region-filter-card">
-        <div class="region-filter-card-header">Region Filter</div>
-        <div class="region-filter-row">
-          <div class="donut-wrap">
-            <svg viewBox="0 0 42 42" class="region-donut" id="spendsRegionDonut"></svg>
-            <div class="donut-center" id="spendsDonutCenterLabel">ALL</div>
-          </div>
-          <ul class="donut-legend" id="spendsRegionLegend"></ul>
         </div>
       </div>
     </div>
