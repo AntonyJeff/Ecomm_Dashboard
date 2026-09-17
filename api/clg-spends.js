@@ -29,6 +29,31 @@ const FACEBOOK_KEYWORD_TO_REGION = [
   ['LATAM_Ecomm', 'LATAM'],
 ];
 
+// Email/WhatsApp (Netcore's own messaging channels, free -- no spend) have no
+// region column at all. Campaign names follow a `Q<n>_<REGION>[_<REGION2>]_...`
+// convention (confirmed live against both sheets), so the region is the
+// LEFTMOST underscore/space/hyphen-separated token that matches a known code
+// -- this correctly reads "IN_Ecomm_Global_NDL_Dimi_SEA_Email" as India (not
+// SEA, which only shows up later as an audience-segment name) and
+// "SEA_MEA_Ecomm_Jewel..." as SEA (its primary/first-listed region). "MEA"
+// (Middle East & Africa) only shows up on these two channels, not
+// LinkedIn/Facebook, so it's a Spends-tab-only region -- see
+// SPENDS_MESSAGING_REGIONS in app.js.
+const MESSAGING_REGION_TOKENS = { IN: 'India', SEA: 'SEA', EU: 'EU', LATAM: 'LATAM', MEA: 'MEA' };
+function classifyMessagingRegion(name) {
+  const tokens = name.split(/[^A-Za-z0-9]+/);
+  for (const t of tokens) {
+    const region = MESSAGING_REGION_TOKENS[t.toUpperCase()];
+    if (region) return region;
+  }
+  return null;
+}
+// This dashboard is Ecomm-only -- Email/Whatsapp carry plenty of non-Ecomm
+// campaigns (BFSI, webinars, etc.) that must be excluded.
+function isEcommCampaign(name) {
+  return /ecomm|e-commerce/i.test(name);
+}
+
 const findCol = (headers, name) => headers.findIndex(h => (h || '').toString().trim().toLowerCase() === name.toLowerCase());
 
 function dayTS(dateStr) {
@@ -124,6 +149,94 @@ function toChannelResult(byRegion) {
   return result;
 }
 
+// Email/WhatsApp: no spend at all, so the metrics are the raw send/delivery/
+// engagement counts instead -- percentages are RE-DERIVED from summed counts
+// for the same reason CTR/CPM are above (never average per-row percentages).
+// Confirmed live against real rows: Delivered % = Delivered/Sent, while
+// Unique Opened % and Unique Clicked % are both out of Delivered (not Sent).
+function emptyMessagingTotals() {
+  return { sent: 0, delivered: 0, totalOpened: 0, uniqueOpened: 0, totalClicked: 0, uniqueClicked: 0 };
+}
+function deriveMessagingRates(totals) {
+  const deliveredPct = totals.sent > 0 ? (totals.delivered / totals.sent) * 100 : 0;
+  const uniqueOpenedPct = totals.delivered > 0 ? (totals.uniqueOpened / totals.delivered) * 100 : 0;
+  const uniqueClickedPct = totals.delivered > 0 ? (totals.uniqueClicked / totals.delivered) * 100 : 0;
+  return { ...totals, deliveredPct, uniqueOpenedPct, uniqueClickedPct };
+}
+
+function buildMessagingChannelData(rows, startTS, endTS) {
+  const byRegion = {
+    India: { campaigns: new Map(), kpi: emptyMessagingTotals() },
+    SEA: { campaigns: new Map(), kpi: emptyMessagingTotals() },
+    EU: { campaigns: new Map(), kpi: emptyMessagingTotals() },
+    LATAM: { campaigns: new Map(), kpi: emptyMessagingTotals() },
+    MEA: { campaigns: new Map(), kpi: emptyMessagingTotals() },
+  };
+  if (rows.length < 2) return byRegion;
+
+  const h = rows[0];
+  const cols = {
+    campaignName: findCol(h, 'Campaign Name'),
+    date: findCol(h, 'Sent Date'),
+    sent: findCol(h, 'Sent'),
+    delivered: findCol(h, 'Delivered'),
+    totalOpened: findCol(h, 'Total Opened/Read'),
+    uniqueOpened: findCol(h, 'Unique Opened'),
+    totalClicked: findCol(h, 'Total Clicked'),
+    uniqueClicked: findCol(h, 'Unique Clicked'),
+  };
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const ts = parseDate(row[cols.date]);
+    if (!inRange(ts, startTS, endTS)) continue;
+
+    const campaignName = (row[cols.campaignName] || '').toString().trim();
+    if (!isEcommCampaign(campaignName)) continue;
+    const region = classifyMessagingRegion(campaignName);
+    if (!region) continue;
+
+    const sent = parseFloat(row[cols.sent]) || 0;
+    const delivered = parseFloat(row[cols.delivered]) || 0;
+    const totalOpened = parseFloat(row[cols.totalOpened]) || 0;
+    const uniqueOpened = parseFloat(row[cols.uniqueOpened]) || 0;
+    const totalClicked = parseFloat(row[cols.totalClicked]) || 0;
+    const uniqueClicked = parseFloat(row[cols.uniqueClicked]) || 0;
+
+    const regionData = byRegion[region];
+    regionData.kpi.sent += sent;
+    regionData.kpi.delivered += delivered;
+    regionData.kpi.totalOpened += totalOpened;
+    regionData.kpi.uniqueOpened += uniqueOpened;
+    regionData.kpi.totalClicked += totalClicked;
+    regionData.kpi.uniqueClicked += uniqueClicked;
+
+    if (!regionData.campaigns.has(campaignName)) regionData.campaigns.set(campaignName, emptyMessagingTotals());
+    const c = regionData.campaigns.get(campaignName);
+    c.sent += sent;
+    c.delivered += delivered;
+    c.totalOpened += totalOpened;
+    c.uniqueOpened += uniqueOpened;
+    c.totalClicked += totalClicked;
+    c.uniqueClicked += uniqueClicked;
+  }
+  return byRegion;
+}
+
+function toMessagingChannelResult(byRegion) {
+  const result = {};
+  for (const region of Object.keys(byRegion)) {
+    const { campaigns, kpi } = byRegion[region];
+    result[region] = {
+      kpi: deriveMessagingRates(kpi),
+      campaigns: [...campaigns.entries()]
+        .map(([name, totals]) => ({ name, ...deriveMessagingRates(totals) }))
+        .sort((a, b) => b.sent - a.sent),
+    };
+  }
+  return result;
+}
+
 export default async function handler(req, res) {
   try {
     const startDate = (req.query && req.query.startDate) || '2026-04-01';
@@ -155,7 +268,9 @@ export default async function handler(req, res) {
       }
     };
 
-    const [linkedinRows, facebookRows] = await Promise.all([getTab('Linkedin'), getTab('Facebook')]);
+    const [linkedinRows, facebookRows, emailRows, whatsappRows] = await Promise.all([
+      getTab('Linkedin'), getTab('Facebook'), getTab('Email'), getTab('Whatsapp'),
+    ]);
 
     const linkedinByRegion = buildChannelData(linkedinRows, startTS, endTS, (row, h) => {
       const groupCol = findCol(h, 'Campaign group name');
@@ -175,9 +290,26 @@ export default async function handler(req, res) {
     const linkedin = toChannelResult(linkedinByRegion);
     const meta = toChannelResult(facebookByRegion);
 
+    const emailByRegion = buildMessagingChannelData(emailRows, startTS, endTS);
+    const whatsappByRegion = buildMessagingChannelData(whatsappRows, startTS, endTS);
+    const email = toMessagingChannelResult(emailByRegion);
+    const whatsapp = toMessagingChannelResult(whatsappByRegion);
+
+    // LinkedIn/Meta have no MEA campaigns (paid Ecomm hasn't launched there
+    // yet) and Email/Whatsapp are never queried for a region outside the 5
+    // known ones -- either way, fall back to a clean zero-value shape rather
+    // than leaving a hole in the response.
+    const emptyPaidChannel = { kpi: deriveRates(emptyTotals()), campaigns: [] };
+    const emptyMessagingChannel = { kpi: deriveMessagingRates(emptyMessagingTotals()), campaigns: [] };
+
     const regions = {};
-    for (const region of ['India', 'SEA', 'EU', 'LATAM']) {
-      regions[region] = { linkedin: linkedin[region], meta: meta[region] };
+    for (const region of ['India', 'SEA', 'EU', 'LATAM', 'MEA']) {
+      regions[region] = {
+        linkedin: linkedin[region] || emptyPaidChannel,
+        meta: meta[region] || emptyPaidChannel,
+        email: email[region] || emptyMessagingChannel,
+        whatsapp: whatsapp[region] || emptyMessagingChannel,
+      };
     }
 
     res.status(200).json({ startDate, endDate, regions, lastUpdated: new Date().toISOString() });

@@ -15,6 +15,19 @@ const REGIONS = [
   { key: 'LATAM', color: PALETTE[3] },
 ];
 
+// Email/WhatsApp (Spends tab only, see api/clg-spends.js) also carry an MEA
+// (Middle East & Africa) region that LinkedIn/Meta Ads don't have yet -- kept
+// out of the shared REGIONS list above so the Leads/Trends region filter,
+// which has no MEA Salesforce data, never shows it.
+const SPENDS_MESSAGING_REGIONS = [...REGIONS, { key: 'MEA', color: PALETTE[4] }];
+const MESSAGING_CHANNELS = new Set(['email', 'whatsapp']);
+function spendsIsMessaging() {
+  return MESSAGING_CHANNELS.has(spendsActiveChannel);
+}
+function spendsRegionsForChannel() {
+  return spendsIsMessaging() ? SPENDS_MESSAGING_REGIONS : REGIONS;
+}
+
 let activeRegion = 'India';
 let activeStage = 'lead';
 let lastData = null;
@@ -1037,12 +1050,13 @@ function spendsResetDateRange() {
 function spendsRenderDonut() {
   const svg = document.getElementById('spendsRegionDonut');
   const r = 15.915;
-  const share = 100 / REGIONS.length;
+  const regionsForChannel = spendsRegionsForChannel();
+  const share = 100 / regionsForChannel.length;
   const gap = 1.6;
   const segLen = share - gap;
 
   let offset = 0;
-  const circles = REGIONS.map(region => {
+  const circles = regionsForChannel.map(region => {
     const isActive = spendsActiveRegion === region.key;
     const cls = `donut-seg${isActive ? ' donut-seg-active' : ' donut-seg-dim'}`;
     const strokeWidth = isActive ? 8 : 6;
@@ -1058,7 +1072,7 @@ function spendsRenderDonut() {
 
 function spendsRenderRegionLegend() {
   const legend = document.getElementById('spendsRegionLegend');
-  legend.innerHTML = REGIONS.map(region => `
+  legend.innerHTML = spendsRegionsForChannel().map(region => `
     <li data-region="${region.key}" class="${spendsActiveRegion === region.key ? 'active' : ''}">
       <span class="swatch" style="background:${region.color}"></span>
       ${escapeHtml(region.key)}
@@ -1084,6 +1098,47 @@ setInterval(() => {
   if (el) el.textContent = `▶ ${SPENDS_RADAR_MESSAGES[spendsRadarMsgIdx]}`;
 }, 2200);
 
+// ---- Channel-specific presentation -- LinkedIn/Meta Ads are paid (spend,
+// clicks, impressions, CTR/CPM/CPC); Email/WhatsApp are free sends (no spend
+// at all), so they get their own KPI-tile and table-column configs instead of
+// forcing send/delivery counts through spend-shaped labels. ----
+const SPENDS_KPI_CONFIG = {
+  paid: [
+    { valueId: 'spendsTotalSpend', deltaId: 'spendsTotalSpendDelta', labelId: 'spendsKpi1Label', captionId: 'spendsKpi1Caption', label: 'Total Spend', caption: 'this period', get: k => k.spend, fmt: fmtCurrency },
+    { valueId: 'spendsTotalClicks', deltaId: 'spendsTotalClicksDelta', labelId: 'spendsKpi2Label', captionId: 'spendsKpi2Caption', label: 'Total Clicks', caption: 'this period', get: k => k.clicks, fmt: fmtInt },
+    { valueId: 'spendsCtr', deltaId: 'spendsCtrDelta', labelId: 'spendsKpi3Label', captionId: 'spendsKpi3Caption', label: 'CTR', caption: 'click-through rate', get: k => k.ctr, fmt: v => `${fmtDec(v)}%` },
+    { valueId: 'spendsCpm', deltaId: 'spendsCpmDelta', labelId: 'spendsKpi4Label', captionId: 'spendsKpi4Caption', label: 'CPM', caption: 'cost per 1000 impr.', get: k => k.cpm, fmt: fmtCurrency },
+  ],
+  messaging: [
+    { valueId: 'spendsTotalSpend', deltaId: 'spendsTotalSpendDelta', labelId: 'spendsKpi1Label', captionId: 'spendsKpi1Caption', label: 'Total Sent', caption: 'this period', get: k => k.sent, fmt: fmtInt },
+    { valueId: 'spendsTotalClicks', deltaId: 'spendsTotalClicksDelta', labelId: 'spendsKpi2Label', captionId: 'spendsKpi2Caption', label: 'Delivered', caption: 'this period', get: k => k.delivered, fmt: fmtInt },
+    { valueId: 'spendsCtr', deltaId: 'spendsCtrDelta', labelId: 'spendsKpi3Label', captionId: 'spendsKpi3Caption', label: 'Unique Opened %', caption: 'of delivered', get: k => k.uniqueOpenedPct, fmt: v => `${fmtDec(v)}%` },
+    { valueId: 'spendsCpm', deltaId: 'spendsCpmDelta', labelId: 'spendsKpi4Label', captionId: 'spendsKpi4Caption', label: 'Unique Clicked %', caption: 'of delivered', get: k => k.uniqueClickedPct, fmt: v => `${fmtDec(v)}%` },
+  ],
+};
+
+const SPENDS_TABLE_COLUMNS = {
+  paid: [
+    { key: 'spend', label: 'Amount Spent', fmt: fmtCurrency },
+    { key: 'clicks', label: 'Clicks', fmt: fmtInt },
+    { key: 'impressions', label: 'Impressions', fmt: fmtInt },
+    { key: 'ctr', label: 'CTR', fmt: v => `${fmtDec(v)}%` },
+    { key: 'cpm', label: 'CPM', fmt: fmtCurrency },
+    { key: 'cpc', label: 'CPC', fmt: fmtCurrency },
+  ],
+  messaging: [
+    { key: 'sent', label: 'Sent', fmt: fmtInt },
+    { key: 'delivered', label: 'Delivered', fmt: fmtInt },
+    { key: 'deliveredPct', label: 'Delivered %', fmt: v => `${fmtDec(v)}%` },
+    { key: 'totalOpened', label: 'Total Opened/Read', fmt: fmtInt },
+    { key: 'uniqueOpened', label: 'Unique Opened', fmt: fmtInt },
+    { key: 'uniqueOpenedPct', label: 'Unique Opened %', fmt: v => `${fmtDec(v)}%` },
+    { key: 'totalClicked', label: 'Total Clicked', fmt: fmtInt },
+    { key: 'uniqueClicked', label: 'Unique Clicked', fmt: fmtInt },
+    { key: 'uniqueClickedPct', label: 'Unique Clicked %', fmt: v => `${fmtDec(v)}%` },
+  ],
+};
+
 function spendsRenderRadar(kpi, campaignCount) {
   const blipCount = Math.max(1, Math.min(RADAR_BLIP_SLOTS.length, Math.ceil(campaignCount / 2)));
   const g = document.getElementById('spendsRadarBlips');
@@ -1098,10 +1153,16 @@ function spendsRenderRadar(kpi, campaignCount) {
     `;
   }).join('');
 
+  const isMsg = spendsIsMessaging();
   document.getElementById('spendsRadarCampaigns').textContent = fmtInt(campaignCount);
-  document.getElementById('spendsRadarImpressions').textContent = fmtInt(kpi.impressions);
-  document.getElementById('spendsRadarCpc').textContent = fmtCurrency(kpi.cpc);
+  document.getElementById('spendsRadarImpressionsLabel').textContent = isMsg ? 'DELIVERED' : 'IMPRESSIONS';
+  document.getElementById('spendsRadarImpressions').textContent = isMsg ? fmtInt(kpi.delivered) : fmtInt(kpi.impressions);
+  document.getElementById('spendsRadarCpcLabel').textContent = isMsg ? 'UNIQUE CLICK %' : 'AVG CPC';
+  document.getElementById('spendsRadarCpc').textContent = isMsg ? `${fmtDec(kpi.uniqueClickedPct)}%` : fmtCurrency(kpi.cpc);
   document.getElementById('spendsRadarWindow').textContent = `▶ SCAN WINDOW: ${spendsStartDate} → ${spendsEndDate}`;
+
+  const channelLabels = { linkedin: 'LINKEDIN', meta: 'META', email: 'EMAIL', whatsapp: 'WHATSAPP' };
+  document.getElementById('spendsRadarSyncLine').innerHTML = `&#9654; ${channelLabels[spendsActiveChannel]} SYNCED <span class="radar-dot-ok">&#9679;</span>`;
 }
 
 function spendsToggleGroup() {
@@ -1121,8 +1182,18 @@ function spendsRenderTable() {
   // undefined prev value (vs. a real 0) tells deltaBadgeHtml to render nothing.
   const prevFor = (name, key) => prevChannelData ? ((prevByName.get(name) || { [key]: 0 })[key]) : undefined;
 
+  const cols = SPENDS_TABLE_COLUMNS[spendsIsMessaging() ? 'messaging' : 'paid'];
+
+  document.getElementById('spendsTableHead').innerHTML = `
+    <tr>
+      <th class="pin pin-quarter spends-th-name">Campaign Name</th>
+      ${cols.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}
+    </tr>
+  `;
+
+  const metaHeadline = spendsIsMessaging() ? `${cols[0].fmt(kpi[cols[0].key])} sent` : cols[0].fmt(kpi[cols[0].key]);
   document.getElementById('spendsGroupTitle').textContent = `${spendsActiveRegion} Campaigns`;
-  document.getElementById('spendsGroupMeta').textContent = `${campaigns.length} campaign${campaigns.length === 1 ? '' : 's'} · ${fmtCurrency(kpi.spend)}`;
+  document.getElementById('spendsGroupMeta').textContent = `${campaigns.length} campaign${campaigns.length === 1 ? '' : 's'} · ${metaHeadline}`;
   document.querySelector('.spends-group-arrow').innerHTML = spendsGroupExpanded ? '&#9662;' : '&#9656;';
   document.getElementById('spendsTableWrap').classList.toggle('hidden', !spendsGroupExpanded);
 
@@ -1131,26 +1202,16 @@ function spendsRenderTable() {
     ? campaigns.map(c => `
       <tr>
         <td class="pin pin-quarter spends-td-name" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</td>
-        <td>${fmtCurrency(c.spend)}${deltaBadgeHtml(c.spend, prevFor(c.name, 'spend'))}</td>
-        <td>${fmtInt(c.clicks)}${deltaBadgeHtml(c.clicks, prevFor(c.name, 'clicks'))}</td>
-        <td>${fmtInt(c.impressions)}${deltaBadgeHtml(c.impressions, prevFor(c.name, 'impressions'))}</td>
-        <td>${fmtDec(c.ctr)}%${deltaBadgeHtml(c.ctr, prevFor(c.name, 'ctr'))}</td>
-        <td>${fmtCurrency(c.cpm)}${deltaBadgeHtml(c.cpm, prevFor(c.name, 'cpm'))}</td>
-        <td>${fmtCurrency(c.cpc)}${deltaBadgeHtml(c.cpc, prevFor(c.name, 'cpc'))}</td>
+        ${cols.map(col => `<td>${col.fmt(c[col.key])}${deltaBadgeHtml(c[col.key], prevFor(c.name, col.key))}</td>`).join('')}
       </tr>
     `).join('')
-    : '<tr><td colspan="7" class="empty">No matching campaigns in this range.</td></tr>';
+    : `<tr><td colspan="${cols.length + 1}" class="empty">No matching campaigns in this range.</td></tr>`;
 
   const tfoot = document.getElementById('spendsTableFoot');
   tfoot.innerHTML = campaigns.length ? `
     <tr class="pivot-total-row">
       <td class="pin pin-quarter">Total</td>
-      <td>${fmtCurrency(kpi.spend)}${prevKpi ? deltaBadgeHtml(kpi.spend, prevKpi.spend) : ''}</td>
-      <td>${fmtInt(kpi.clicks)}${prevKpi ? deltaBadgeHtml(kpi.clicks, prevKpi.clicks) : ''}</td>
-      <td>${fmtInt(kpi.impressions)}${prevKpi ? deltaBadgeHtml(kpi.impressions, prevKpi.impressions) : ''}</td>
-      <td>${fmtDec(kpi.ctr)}%${prevKpi ? deltaBadgeHtml(kpi.ctr, prevKpi.ctr) : ''}</td>
-      <td>${fmtCurrency(kpi.cpm)}${prevKpi ? deltaBadgeHtml(kpi.cpm, prevKpi.cpm) : ''}</td>
-      <td>${fmtCurrency(kpi.cpc)}${prevKpi ? deltaBadgeHtml(kpi.cpc, prevKpi.cpc) : ''}</td>
+      ${cols.map(col => `<td>${col.fmt(kpi[col.key])}${prevKpi ? deltaBadgeHtml(kpi[col.key], prevKpi[col.key]) : ''}</td>`).join('')}
     </tr>
   ` : '';
 
@@ -1173,15 +1234,13 @@ function spendsRender() {
   const prevChannelData = spendsGetPrevChannelData();
   const prevKpi = prevChannelData ? prevChannelData.kpi : null;
 
-  document.getElementById('spendsTotalSpend').textContent = fmtCurrency(kpi.spend);
-  document.getElementById('spendsTotalClicks').textContent = fmtInt(kpi.clicks);
-  document.getElementById('spendsCtr').textContent = `${fmtDec(kpi.ctr)}%`;
-  document.getElementById('spendsCpm').textContent = fmtCurrency(kpi.cpm);
-
-  spendsSetKpiDelta('spendsTotalSpendDelta', kpi.spend, prevKpi ? prevKpi.spend : null);
-  spendsSetKpiDelta('spendsTotalClicksDelta', kpi.clicks, prevKpi ? prevKpi.clicks : null);
-  spendsSetKpiDelta('spendsCtrDelta', kpi.ctr, prevKpi ? prevKpi.ctr : null);
-  spendsSetKpiDelta('spendsCpmDelta', kpi.cpm, prevKpi ? prevKpi.cpm : null);
+  const config = SPENDS_KPI_CONFIG[spendsIsMessaging() ? 'messaging' : 'paid'];
+  config.forEach(tile => {
+    document.getElementById(tile.labelId).textContent = tile.label;
+    document.getElementById(tile.captionId).textContent = tile.caption;
+    document.getElementById(tile.valueId).textContent = tile.fmt(tile.get(kpi));
+    spendsSetKpiDelta(tile.deltaId, tile.get(kpi), prevKpi ? tile.get(prevKpi) : null);
+  });
 
   spendsRenderRadar(kpi, channelData.campaigns.length);
   spendsRenderTable();
@@ -1248,6 +1307,12 @@ document.getElementById('spendsChannelTabs').addEventListener('click', (e) => {
   spendsActiveChannel = btn.dataset.channel;
   document.querySelectorAll('#spendsChannelTabs [data-channel]').forEach(t => t.classList.toggle('active', t === btn));
   pulseScale(btn);
+  // MEA only exists for Email/WhatsApp -- bounce back to India rather than
+  // showing an empty region if the user had MEA selected and switched to a
+  // paid channel.
+  if (!spendsIsMessaging() && spendsActiveRegion === 'MEA') spendsActiveRegion = 'India';
+  spendsRenderDonut();
+  spendsRenderRegionLegend();
   spendsRender();
 });
 
