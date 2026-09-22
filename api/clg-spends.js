@@ -78,6 +78,94 @@ function inRange(ts, startTS, endTS) {
   return ts !== null && ts >= startTS && ts <= endTS;
 }
 
+// -- Campaign -> Leads attribution --------------------------------------------
+// A lead's Source__c holds the exact ad campaign name it came from (same
+// naming convention as these LinkedIn/Facebook sheets' Campaign Name column --
+// see pickSourceField in api/clg-regions.js, reproduced here for the one
+// exception: Google Ads leads carry the campaign name in Utm_Campaign__c
+// instead). Matching this against a campaign's own name (case/whitespace
+// normalized) tells us how many leads that specific campaign directly
+// produced, scoped to whatever date range is currently selected.
+//
+// Only India/SEA/EU have a synced Leads sheet so far (LATAM's is "we'll do
+// that later" per the user) -- LATAM/MEA campaigns simply get 0 leads until
+// that sync exists, rather than erroring.
+const REGION_LEAD_SHEETS = { India: 'india_ecomm_lead', SEA: 'sea_ecomm_lead', EU: 'eu_ecomm_lead' };
+
+function normalizeSourceName(name) {
+  return (name || '').toString().trim().toLowerCase();
+}
+
+function pickSourceField(subLeadSource, sourceVal, utmCampaignVal) {
+  const source = (sourceVal || '').toString().trim();
+  const utmCampaign = (utmCampaignVal || '').toString().trim();
+  const isGoogleAds = (subLeadSource || '').toString().trim() === 'Google Ads';
+  return isGoogleAds ? (utmCampaign || source) : (source || utmCampaign);
+}
+
+// normalizedSource -> { count, records, ndlCount, ndlRecords, dlCount, dlRecords },
+// scoped to [startTS, endTS] by the lead's own CreatedDate. NDL (Non Demo
+// Lead) is the boolean NDL__c field; DL (Disqualified Lead) is Status ===
+// 'Disqualified MQL' (same mapping the Lead Status crosstab uses -- see
+// STATUS_DEFS / statusGroups in api/clg-regions.js).
+const DISQUALIFIED_STATUS = 'Disqualified MQL';
+
+function buildLeadsBySource(rows, startTS, endTS) {
+  const map = new Map();
+  if (rows.length < 2) return map;
+
+  const h = rows[0];
+  const cols = {
+    createdDate: findCol(h, 'CreatedDate'),
+    id: findCol(h, 'Id'),
+    name: findCol(h, 'Name'),
+    company: findCol(h, 'Company'),
+    title: findCol(h, 'Title'),
+    source: findCol(h, 'Source__c'),
+    utmCampaign: findCol(h, 'Utm_Campaign__c'),
+    subLeadSource: findCol(h, 'Sub_Lead_Source_Category__c'),
+    status: findCol(h, 'Status'),
+    ndl: findCol(h, 'NDL__c'),
+  };
+
+  const blank = () => ({ count: 0, records: [], ndlCount: 0, ndlRecords: [], dlCount: 0, dlRecords: [] });
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const ts = parseDate(row[cols.createdDate]);
+    if (!inRange(ts, startTS, endTS)) continue;
+
+    const sourceVal = pickSourceField(row[cols.subLeadSource], row[cols.source], row[cols.utmCampaign]);
+    const norm = normalizeSourceName(sourceVal);
+    if (!norm) continue;
+
+    if (!map.has(norm)) map.set(norm, blank());
+    const entry = map.get(norm);
+    const record = {
+      id: row[cols.id] || '',
+      name: (row[cols.name] || '').toString().trim() || row[cols.id] || '(no name)',
+      company: (row[cols.company] || '').toString().trim(),
+      title: (row[cols.title] || '').toString().trim(),
+      source: sourceVal,
+    };
+    entry.count += 1;
+    entry.records.push(record);
+
+    const isNdl = row[cols.ndl] === true || row[cols.ndl] === 'TRUE' || row[cols.ndl] === 'true';
+    if (isNdl) {
+      entry.ndlCount += 1;
+      entry.ndlRecords.push(record);
+    }
+
+    const status = (row[cols.status] || '').toString().trim();
+    if (status === DISQUALIFIED_STATUS) {
+      entry.dlCount += 1;
+      entry.dlRecords.push(record);
+    }
+  }
+  return map;
+}
+
 function emptyTotals() {
   return { spend: 0, clicks: 0, impressions: 0 };
 }
@@ -102,6 +190,7 @@ function buildChannelData(rows, startTS, endTS, classifyRow) {
   const h = rows[0];
   const cols = {
     campaignName: findCol(h, 'Campaign name'),
+    creativeName: findCol(h, 'Creative name'),
     date: findCol(h, 'Date'),
     spend: findCol(h, 'Amount spent'),
     clicks: findCol(h, 'Clicks'),
@@ -117,6 +206,7 @@ function buildChannelData(rows, startTS, endTS, classifyRow) {
     if (!region) continue;
 
     const campaignName = (row[cols.campaignName] || '').toString().trim();
+    const creativeName = (row[cols.creativeName] || '').toString().trim();
     const spend = parseFloat(row[cols.spend]) || 0;
     const clicks = parseFloat(row[cols.clicks]) || 0;
     const impressions = parseFloat(row[cols.impressions]) || 0;
@@ -126,23 +216,47 @@ function buildChannelData(rows, startTS, endTS, classifyRow) {
     regionData.kpi.clicks += clicks;
     regionData.kpi.impressions += impressions;
 
-    if (!regionData.campaigns.has(campaignName)) regionData.campaigns.set(campaignName, emptyTotals());
-    const c = regionData.campaigns.get(campaignName);
-    c.spend += spend;
-    c.clicks += clicks;
-    c.impressions += impressions;
+    if (!regionData.campaigns.has(campaignName)) {
+      regionData.campaigns.set(campaignName, { totals: emptyTotals(), creatives: new Map() });
+    }
+    const campaign = regionData.campaigns.get(campaignName);
+    campaign.totals.spend += spend;
+    campaign.totals.clicks += clicks;
+    campaign.totals.impressions += impressions;
+
+    if (!campaign.creatives.has(creativeName)) campaign.creatives.set(creativeName, emptyTotals());
+    const cr = campaign.creatives.get(creativeName);
+    cr.spend += spend;
+    cr.clicks += clicks;
+    cr.impressions += impressions;
   }
   return byRegion;
 }
 
-function toChannelResult(byRegion) {
+function toChannelResult(byRegion, leadsByRegion) {
   const result = {};
   for (const region of Object.keys(byRegion)) {
     const { campaigns, kpi } = byRegion[region];
+    const leadsBySource = (leadsByRegion && leadsByRegion[region]) || new Map();
     result[region] = {
       kpi: deriveRates(kpi),
       campaigns: [...campaigns.entries()]
-        .map(([name, totals]) => ({ name, ...deriveRates(totals) }))
+        .map(([name, { totals, creatives }]) => {
+          const leadsEntry = leadsBySource.get(normalizeSourceName(name));
+          return {
+            name,
+            ...deriveRates(totals),
+            leadCount: leadsEntry ? leadsEntry.count : 0,
+            leadRecords: leadsEntry ? leadsEntry.records : [],
+            ndlCount: leadsEntry ? leadsEntry.ndlCount : 0,
+            ndlRecords: leadsEntry ? leadsEntry.ndlRecords : [],
+            dlCount: leadsEntry ? leadsEntry.dlCount : 0,
+            dlRecords: leadsEntry ? leadsEntry.dlRecords : [],
+            creatives: [...creatives.entries()]
+              .map(([creativeName, creativeTotals]) => ({ name: creativeName, ...deriveRates(creativeTotals) }))
+              .sort((a, b) => b.spend - a.spend),
+          };
+        })
         .sort((a, b) => b.spend - a.spend),
     };
   }
@@ -223,14 +337,27 @@ function buildMessagingChannelData(rows, startTS, endTS) {
   return byRegion;
 }
 
-function toMessagingChannelResult(byRegion) {
+function toMessagingChannelResult(byRegion, leadsByRegion) {
   const result = {};
   for (const region of Object.keys(byRegion)) {
     const { campaigns, kpi } = byRegion[region];
+    const leadsBySource = (leadsByRegion && leadsByRegion[region]) || new Map();
     result[region] = {
       kpi: deriveMessagingRates(kpi),
       campaigns: [...campaigns.entries()]
-        .map(([name, totals]) => ({ name, ...deriveMessagingRates(totals) }))
+        .map(([name, totals]) => {
+          const leadsEntry = leadsBySource.get(normalizeSourceName(name));
+          return {
+            name,
+            ...deriveMessagingRates(totals),
+            leadCount: leadsEntry ? leadsEntry.count : 0,
+            leadRecords: leadsEntry ? leadsEntry.records : [],
+            ndlCount: leadsEntry ? leadsEntry.ndlCount : 0,
+            ndlRecords: leadsEntry ? leadsEntry.ndlRecords : [],
+            dlCount: leadsEntry ? leadsEntry.dlCount : 0,
+            dlRecords: leadsEntry ? leadsEntry.dlRecords : [],
+          };
+        })
         .sort((a, b) => b.sent - a.sent),
     };
   }
@@ -268,9 +395,15 @@ export default async function handler(req, res) {
       }
     };
 
-    const [linkedinRows, facebookRows, emailRows, whatsappRows] = await Promise.all([
+    const [linkedinRows, facebookRows, emailRows, whatsappRows, ...leadRowsByRegion] = await Promise.all([
       getTab('Linkedin'), getTab('Facebook'), getTab('Email'), getTab('Whatsapp'),
+      ...Object.values(REGION_LEAD_SHEETS).map(getTab),
     ]);
+
+    const leadsByRegion = {};
+    Object.keys(REGION_LEAD_SHEETS).forEach((region, i) => {
+      leadsByRegion[region] = buildLeadsBySource(leadRowsByRegion[i], startTS, endTS);
+    });
 
     const linkedinByRegion = buildChannelData(linkedinRows, startTS, endTS, (row, h) => {
       const groupCol = findCol(h, 'Campaign group name');
@@ -287,13 +420,13 @@ export default async function handler(req, res) {
       return null;
     });
 
-    const linkedin = toChannelResult(linkedinByRegion);
-    const meta = toChannelResult(facebookByRegion);
+    const linkedin = toChannelResult(linkedinByRegion, leadsByRegion);
+    const meta = toChannelResult(facebookByRegion, leadsByRegion);
 
     const emailByRegion = buildMessagingChannelData(emailRows, startTS, endTS);
     const whatsappByRegion = buildMessagingChannelData(whatsappRows, startTS, endTS);
-    const email = toMessagingChannelResult(emailByRegion);
-    const whatsapp = toMessagingChannelResult(whatsappByRegion);
+    const email = toMessagingChannelResult(emailByRegion, leadsByRegion);
+    const whatsapp = toMessagingChannelResult(whatsappByRegion, leadsByRegion);
 
     // LinkedIn/Meta have no MEA campaigns (paid Ecomm hasn't launched there
     // yet) and Email/Whatsapp are never queried for a region outside the 5

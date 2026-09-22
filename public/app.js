@@ -139,7 +139,7 @@ function renderLegend(subSourceOrder) {
   `).join('');
 }
 
-function renderChart(regionData) {
+function renderChart(regionData, valueFmt = fmtInt) {
   const { chart, subSourceOrder, chartMode } = regionData;
   const maxCount = Math.max(1, ...chart.flatMap(q => q.bars.map(b => b.count)));
   const isSimple = chartMode === 'simple';
@@ -152,7 +152,7 @@ function renderChart(regionData) {
           ${isSimple ? '' : `<span class="bar-label" title="${escapeHtml(subSource)}">${escapeHtml(subSource)}</span>`}
           <span class="bar-track">
             <span class="bar-fill" style="width:${Math.max(2, (count / maxCount) * 100)}%; background:${isSimple ? 'var(--accent)' : colorFor(subSource, subSourceOrder)}">
-              <span class="bar-value">${fmtInt(count)}</span>
+              <span class="bar-value">${valueFmt(count)}</span>
             </span>
           </span>
         </div>
@@ -381,30 +381,11 @@ function renderSqlRegion(data) {
 // and no pivot table -- the Funnel View tab already shows that same
 // underlying data as a table (Leads/IQL/MQL/SQL columns), so repeating it
 // here would just be redundant. Each chart reuses renderChart()/
-// renderLegend() exactly as the old per-stage tabs did; only the title logic
-// differs per stage's own chartMode (IQL/MQL are 'simple' -- one bar per
-// quarter, no legend; Leads/SQL are 'breakdown' with a two-level axis title).
-// MRR trend -- one bar per quarter (Sum of Product Amount(MRR)), shown right
-// below the SQL breakdown chart in Trends. Reuses the same bar-row/bar-track
-// markup as the "simple" IQL/MQL charts, but formatted as currency and in
-// the teal accent so it reads as a distinct, second chart rather than a
-// continuation of the SQL Source/SubSource breakdown above it.
-function renderMrrTrendChart(mrrTrend) {
-  const maxMrr = Math.max(1, ...mrrTrend.map(q => q.mrr));
-  return mrrTrend.map(({ quarter, mrr }) => `
-    <div class="quarter-group">
-      <div class="quarter-label">${escapeHtml(quarter)}</div>
-      <div class="bar-row bar-row-simple">
-        <span class="bar-track">
-          <span class="bar-fill" style="width:${Math.max(2, (mrr / maxMrr) * 100)}%; background:var(--accent-2)">
-            <span class="bar-value">${fmtCurrency(mrr)}</span>
-          </span>
-        </span>
-      </div>
-    </div>
-  `).join('');
-}
-
+// renderLegend() exactly as the old per-stage tabs did. All four stages are
+// 'breakdown' mode: Leads/IQL/MQL by Sub Lead Source, SQL by Opportunity
+// Source > Opportunity Sub Source (IQL/MQL's own pivot table above still
+// groups by Lead Source / Owner Team -- only this chart's data is overridden
+// to Sub Lead Source, see computeSubSourceTrendChart in api/clg-regions.js).
 const TRENDS_STAGES = [
   { key: 'lead', label: 'Leads' },
   { key: 'iql', label: 'IQL' },
@@ -420,9 +401,10 @@ function renderTrends(region) {
     const section = document.createElement('section');
     section.className = 'channel';
 
-    const title = key === 'sql'
-      ? 'Opportunity Source &gt; Opportunity Sub Source'
-      : (data.chartMode === 'breakdown' ? `${escapeHtml(data.dateAxisLabel)} &gt; ${escapeHtml(data.pivot.innerLabel)}` : escapeHtml(data.dateAxisLabel));
+    const chartInnerLabel = data.chartInnerLabel || (data.pivot && data.pivot.innerLabel);
+    const title = data.chartMode === 'breakdown'
+      ? `${escapeHtml(data.dateAxisLabel)} &gt; ${escapeHtml(chartInnerLabel)}`
+      : escapeHtml(data.dateAxisLabel);
 
     const fixedRangeNote = data.fixedDateRange
       ? `<div class="fixed-range-note">This report uses a fixed date range (${data.fixedDateRange[0]} to ${data.fixedDateRange[1]}) regardless of the filters above.</div>`
@@ -441,9 +423,10 @@ function renderTrends(region) {
       ${key === 'sql' ? `
         <div class="funnel-chart-wrap">
           <div class="funnel-chart-header">
-            <h3 class="chart-title">MRR Trend</h3>
+            <h3 class="chart-title">MRR Trend &gt; Opportunity Sub Source</h3>
+            <div class="legend">${renderLegend(data.subSourceOrder)}</div>
           </div>
-          <div class="funnel-chart">${data.mrrTrend && data.mrrTrend.length ? renderMrrTrendChart(data.mrrTrend) : '<div class="empty">No matching opportunities in this range.</div>'}</div>
+          <div class="funnel-chart">${data.mrrChart && data.mrrChart.length ? renderChart({ chart: data.mrrChart, subSourceOrder: data.subSourceOrder, chartMode: 'breakdown' }, fmtCurrency) : '<div class="empty">No matching opportunities in this range.</div>'}</div>
         </div>
       ` : ''}
     `;
@@ -536,6 +519,9 @@ function populateRegionSelectLeads() {
 // loosely with the active region's lead volume, positions are fixed (12
 // deterministic polar slots) so the widget doesn't jitter on every reload. ----
 const RADAR_CX = 100, RADAR_CY = 100;
+// Still used by the Spends tab's Live Campaign Radar (spendsRenderRadar) --
+// the Leads tab's own radar (which used to share these) was replaced by the
+// TAL/Non-TAL widget below.
 const RADAR_BLIP_SLOTS = [
   { deg: 18,  r: 38 }, { deg: 72,  r: 60 }, { deg: 128, r: 30 }, { deg: 165, r: 70 },
   { deg: 210, r: 48 }, { deg: 252, r: 74 }, { deg: 293, r: 36 }, { deg: 328, r: 56 },
@@ -546,53 +532,121 @@ function radarToXY(deg, r) {
   return [RADAR_CX + r * Math.cos(rad), RADAR_CY + r * Math.sin(rad)];
 }
 
-function renderRadar() {
-  let lead = { totalRecords: 0, totalNDL: 0 };
+// TAL/Non-TAL widget -- replaces the old Live Lead Radar. Each company's
+// verdict is decided once (server-side, from that company's first-ever lead
+// touch) and never re-evaluated per lead -- see api/clg-regions.js's
+// buildTalVerdictMap. What DOES follow the dashboard's selected date range
+// and region here is simply which leads get counted/listed under each
+// verdict, exactly like every other Leads-tab number.
+function renderTalWidget() {
+  const regionsToSum = activeRegion === 'All' ? REGIONS.map(r => r.key) : [activeRegion];
+  let talCount = 0, nonTalCount = 0, talRecords = [], nonTalRecords = [];
   if (lastData) {
-    const regionsToSum = activeRegion === 'All' ? REGIONS.map(r => r.key) : [activeRegion];
     for (const region of regionsToSum) {
-      lead.totalRecords += lastData.regions[region].lead.totalRecords;
-      lead.totalNDL += lastData.regions[region].lead.totalNDL;
+      const tal = lastData.regions[region] && lastData.regions[region].lead.tal;
+      if (!tal) continue;
+      talCount += tal.talCount;
+      nonTalCount += tal.nonTalCount;
+      talRecords = talRecords.concat(tal.talRecords);
+      nonTalRecords = nonTalRecords.concat(tal.nonTalRecords);
     }
   }
-  const count = lead.totalRecords;
-  const blipCount = Math.max(1, Math.min(RADAR_BLIP_SLOTS.length, Math.ceil(count / 20)));
-  const g = document.getElementById('radarBlips');
-  g.innerHTML = RADAR_BLIP_SLOTS.slice(0, blipCount).map((slot, i) => {
-    const [x, y] = radarToXY(slot.deg, slot.r);
-    const color = i % 2 ? '#ffd166' : '#ff6b6b';
-    const delay = `${i * 0.4}s`;
-    return `
-      <circle class="radar-blip-ring" cx="${x}" cy="${y}" r="2" style="stroke:${color}; animation-delay:${delay}" />
-      <circle class="radar-blip-ring radar-blip-ring-2" cx="${x}" cy="${y}" r="2" style="stroke:${color}; animation-delay:${i * 0.4 + 0.8}s" />
-      <circle class="radar-blip-dot" cx="${x}" cy="${y}" r="2.5" style="fill:${color}" />
-    `;
-  }).join('');
+  const total = talCount + nonTalCount;
+  const talPct = total > 0 ? (talCount / total) * 100 : 0;
+  const nonTalPct = total > 0 ? (nonTalCount / total) * 100 : 0;
 
-  document.getElementById('radarTracked').textContent = fmtInt(lead.totalRecords);
-  document.getElementById('radarNdl').textContent = fmtInt(lead.totalNDL);
-  document.getElementById('radarSum').textContent = fmtInt(lead.totalRecords + lead.totalNDL);
-  document.getElementById('radarWindow').textContent = `▶ SCAN WINDOW: ${currentStartDate} → ${currentEndDate}`;
+  document.getElementById('talCount').textContent = fmtInt(talCount);
+  document.getElementById('nonTalCount').textContent = fmtInt(nonTalCount);
+  document.getElementById('talPct').textContent = total ? `${fmtDec(talPct)}% of leads` : '—';
+  document.getElementById('nonTalPct').textContent = total ? `${fmtDec(nonTalPct)}% of leads` : '—';
+  document.getElementById('talWindow').textContent = `▶ SCAN WINDOW: ${currentStartDate} → ${currentEndDate}`;
+  document.getElementById('talWidgetBarTal').style.width = `${total ? talPct : 50}%`;
+
+  const talCard = document.getElementById('talCountCard');
+  const nonTalCard = document.getElementById('nonTalCountCard');
+  talCard.dataset.records = encodeURIComponent(JSON.stringify(talRecords));
+  talCard.dataset.statusLabel = 'TAL Leads';
+  nonTalCard.dataset.records = encodeURIComponent(JSON.stringify(nonTalRecords));
+  nonTalCard.dataset.statusLabel = 'Non-TAL Leads';
+
+  renderTalFunnelTable(regionsToSum);
 }
 
-// Cycles the radar's status line through a fixed set of flavor-text messages.
-const RADAR_MESSAGES = [
-  'SCANNING SECTOR...', 'LEAD DETECTED', 'ANALYSING FUNNEL...', 'SIGNAL ACQUIRED',
-  'SCANNING SECTOR...', 'TRACKING VOLUME...', 'DATA SYNCED',
-];
-let radarMsgIdx = 0;
-setInterval(() => {
-  radarMsgIdx = (radarMsgIdx + 1) % RADAR_MESSAGES.length;
-  const el = document.getElementById('radarMessage');
-  if (el) el.textContent = `▶ ${RADAR_MESSAGES[radarMsgIdx]}`;
-}, 2200);
+// IQL/MQL/SQL/MRR TAL/Non-TAL -- same verdict, same per-stage .tal object
+// shape as Leads (see computeTalBreakdown/computeSqlTalBreakdown in
+// api/clg-regions.js), just summed from a different stage each row. MRR
+// reuses SQL's own .tal object (talMrr/nonTalMrr are dollar sums over the
+// exact same deduped-by-Opportunity rows SQL's opportunity count comes from)
+// rather than being a separate stage.
+function renderTalFunnelCell(elId, count, records, label) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = fmtInt(count);
+  el.dataset.records = encodeURIComponent(JSON.stringify(records));
+  el.dataset.statusLabel = label;
+}
+
+function renderTalFunnelTable(regionsToSum) {
+  const sums = {
+    iql: { tal: 0, nonTal: 0, talRecords: [], nonTalRecords: [] },
+    mql: { tal: 0, nonTal: 0, talRecords: [], nonTalRecords: [] },
+    sql: { tal: 0, nonTal: 0, talRecords: [], nonTalRecords: [] },
+    mrr: { tal: 0, nonTal: 0, talRecords: [], nonTalRecords: [] },
+  };
+  if (lastData) {
+    for (const region of regionsToSum) {
+      const regionData = lastData.regions[region];
+      if (!regionData) continue;
+      for (const stage of ['iql', 'mql', 'sql']) {
+        const tal = regionData[stage] && regionData[stage].tal;
+        if (!tal) continue;
+        sums[stage].tal += tal.talCount;
+        sums[stage].nonTal += tal.nonTalCount;
+        sums[stage].talRecords = sums[stage].talRecords.concat(tal.talRecords);
+        sums[stage].nonTalRecords = sums[stage].nonTalRecords.concat(tal.nonTalRecords);
+      }
+      const sqlTal = regionData.sql && regionData.sql.tal;
+      if (sqlTal && sqlTal.talMrr !== undefined) {
+        sums.mrr.tal += sqlTal.talMrr;
+        sums.mrr.nonTal += sqlTal.nonTalMrr;
+        sums.mrr.talRecords = sums.mrr.talRecords.concat(sqlTal.talRecords);
+        sums.mrr.nonTalRecords = sums.mrr.nonTalRecords.concat(sqlTal.nonTalRecords);
+      }
+    }
+  }
+
+  renderTalFunnelCell('talFunnelIqlTal', sums.iql.tal, sums.iql.talRecords, 'TAL IQL');
+  renderTalFunnelCell('talFunnelIqlNonTal', sums.iql.nonTal, sums.iql.nonTalRecords, 'Non-TAL IQL');
+  renderTalFunnelCell('talFunnelMqlTal', sums.mql.tal, sums.mql.talRecords, 'TAL MQL');
+  renderTalFunnelCell('talFunnelMqlNonTal', sums.mql.nonTal, sums.mql.nonTalRecords, 'Non-TAL MQL');
+  renderTalFunnelCell('talFunnelSqlTal', sums.sql.tal, sums.sql.talRecords, 'TAL SQL');
+  renderTalFunnelCell('talFunnelSqlNonTal', sums.sql.nonTal, sums.sql.nonTalRecords, 'Non-TAL SQL');
+
+  const mrrTalEl = document.getElementById('talFunnelMrrTal');
+  const mrrNonTalEl = document.getElementById('talFunnelMrrNonTal');
+  if (mrrTalEl) {
+    mrrTalEl.textContent = fmtCurrency(sums.mrr.tal);
+    mrrTalEl.dataset.records = encodeURIComponent(JSON.stringify(sums.mrr.talRecords));
+    mrrTalEl.dataset.statusLabel = 'TAL MRR';
+  }
+  if (mrrNonTalEl) {
+    mrrNonTalEl.textContent = fmtCurrency(sums.mrr.nonTal);
+    mrrNonTalEl.dataset.records = encodeURIComponent(JSON.stringify(sums.mrr.nonTalRecords));
+    mrrNonTalEl.dataset.statusLabel = 'Non-TAL MRR';
+  }
+}
 
 // ---- Date-range control: an always-visible calendar card (not a dropdown),
-// styled after the reference MonthCalendar component. Two selection modes:
-//   - "single" (default): clicking a day filters everything to that one day.
-//   - "range" (toggled via the Date Range button): first click picks a start
-//     day, then the user can page to a different month and click an end day;
-//     the two are normalized into currentStartDate/currentEndDate.
+// styled after the reference MonthCalendar component. Selecting is always a
+// two-click gesture -- first click picks a start day (shown as a pending
+// pill), second click picks an end day (which can be the same day again, for
+// a single-day filter). That pair is held as a DRAFT (draftStartDate/
+// draftEndDate), not applied immediately -- the popover stays open, showing
+// Update/Cancel buttons, and only Update commits the draft into
+// currentStartDate/currentEndDate (reloading the dashboard) and closes the
+// popover; Cancel (or reopening the popover later) discards the draft and
+// reverts to whatever range is currently applied. Quick-range presets and
+// Reset are one-click, unambiguous actions, so they still apply immediately.
 // hasExplicitSelection tracks whether the user has actually picked a day (vs.
 // still sitting on the FY-to-date default), so the default's wide span
 // doesn't paint every visible day as "in range". Future dates are disabled --
@@ -601,122 +655,176 @@ const DATE_LABEL_FMT = new Intl.DateTimeFormat('en-US', { weekday: 'short', day:
 const RANGE_DATE_FMT = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const CALENDAR_MONTH_FMT = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
-let selectionMode = 'single'; // 'single' | 'range'
+// First-of-month Date (UTC) for dateStr's month, shifted by offsetMonths --
+// used to seed each side of the two-month calendar view.
+function monthStartUTC(dateStr, offsetMonths) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + offsetMonths, 1));
+}
+// Quarter start (Jan/Apr/Jul/Oct 1) for "today" -- these are the same month
+// boundaries whether you call them calendar quarters or fiscal quarters
+// (FY runs Apr-Mar, see fiscalYearStartDate), so one function covers QTD.
+function quarterStartDate() {
+  const now = new Date();
+  const qStartMonth = Math.floor(now.getUTCMonth() / 3) * 3;
+  return `${now.getUTCFullYear()}-${String(qStartMonth + 1).padStart(2, '0')}-01`;
+}
+
 let pendingRangeStart = null;
+let draftStartDate = null;
+let draftEndDate = null;
 let hasExplicitSelection = false;
-// The month currently shown in the calendar -- defaults to the selected end
-// date's month but can be paged independently via prev/next.
-let calendarViewDate = new Date(currentEndDate + 'T00:00:00Z');
+// Two months shown side-by-side (LinkedIn-style single-view range picker),
+// each paged independently via its own prev/next -- defaults to the month
+// before the selected end date (left) and the end date's own month (right).
+let calendarViewDateLeft = monthStartUTC(currentEndDate, -1);
+let calendarViewDateRight = monthStartUTC(currentEndDate, 0);
 
 function renderCalendarHeader() {
-  document.getElementById('calendarMonthLabel').textContent = CALENDAR_MONTH_FMT.format(calendarViewDate).toUpperCase();
-  document.getElementById('dateRangeBtn').classList.toggle('active', selectionMode === 'range');
   document.getElementById('dateRangeTriggerLabelLeads').textContent = formatDateRangeLabel(currentStartDate, currentEndDate);
 
+  const hasDraft = draftStartDate && draftEndDate;
   const hasRange = hasExplicitSelection && currentStartDate !== currentEndDate;
 
   const rangePill = document.getElementById('calendarRangePill');
-  if (hasRange) {
-    rangePill.textContent = `${RANGE_DATE_FMT.format(new Date(currentStartDate + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(currentEndDate + 'T00:00:00Z'))}`;
+  if (hasDraft) {
+    rangePill.textContent = draftStartDate === draftEndDate
+      ? DATE_LABEL_FMT.format(new Date(draftEndDate + 'T00:00:00Z'))
+      : `${RANGE_DATE_FMT.format(new Date(draftStartDate + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(draftEndDate + 'T00:00:00Z'))}`;
     rangePill.classList.remove('hidden');
   } else if (pendingRangeStart) {
     rangePill.textContent = `From ${RANGE_DATE_FMT.format(new Date(pendingRangeStart + 'T00:00:00Z'))} — pick end date`;
+    rangePill.classList.remove('hidden');
+  } else if (hasRange) {
+    rangePill.textContent = `${RANGE_DATE_FMT.format(new Date(currentStartDate + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(currentEndDate + 'T00:00:00Z'))}`;
+    rangePill.classList.remove('hidden');
+  } else if (hasExplicitSelection) {
+    rangePill.textContent = DATE_LABEL_FMT.format(new Date(currentEndDate + 'T00:00:00Z'));
     rangePill.classList.remove('hidden');
   } else {
     rangePill.classList.add('hidden');
   }
 
-  document.getElementById('calendarResetBtn').classList.toggle('hidden', !(selectionMode === 'range' || hasRange));
-
-  const singleLabel = document.getElementById('dateRangeValue');
-  if (selectionMode === 'single' && !hasRange && hasExplicitSelection) {
-    singleLabel.textContent = DATE_LABEL_FMT.format(new Date(currentEndDate + 'T00:00:00Z'));
-    singleLabel.classList.remove('hidden');
-  } else {
-    singleLabel.classList.add('hidden');
-  }
-
-  document.getElementById('calendarHelperText').classList.toggle('hidden', !(selectionMode === 'range' && !pendingRangeStart));
+  document.getElementById('calendarResetBtn').classList.toggle('hidden', !(pendingRangeStart || hasExplicitSelection));
+  document.getElementById('calendarHelperText').classList.toggle('hidden', !!pendingRangeStart || !!hasDraft);
+  document.getElementById('calendarApplyRow').classList.toggle('hidden', !hasDraft);
 }
 
-function renderCalendar() {
-  renderCalendarHeader();
-  updateQuickRangeActive();
-
-  const year = calendarViewDate.getUTCFullYear();
-  const month = calendarViewDate.getUTCMonth();
+function renderCalendarMonthGrid(viewDate, gridId) {
+  const year = viewDate.getUTCFullYear();
+  const month = viewDate.getUTCMonth();
   const firstOfMonth = new Date(Date.UTC(year, month, 1));
   // Grid starts on Monday -- getUTCDay() is 0=Sun..6=Sat, shift so Mon=0.
   const leadingBlanks = (firstOfMonth.getUTCDay() + 6) % 7;
   const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  const hasRange = hasExplicitSelection && currentStartDate !== currentEndDate;
+  // While a draft exists, the calendar highlights the DRAFT pair instead of
+  // whatever's actually applied -- the applied range only reappears if the
+  // draft is cancelled/discarded.
+  const hasDraft = draftStartDate && draftEndDate;
+  const displayStart = hasDraft ? draftStartDate : currentStartDate;
+  const displayEnd = hasDraft ? draftEndDate : currentEndDate;
+  const hasSelection = hasDraft || hasExplicitSelection;
+  const hasRange = hasSelection && displayStart !== displayEnd;
   const cells = [];
   for (let i = 0; i < leadingBlanks; i++) cells.push('<span class="calendar-day calendar-day-blank"></span>');
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const isFuture = dateStr > todayStr;
     const isToday = dateStr === todayStr;
-    const isSingleSelected = selectionMode === 'single' && hasExplicitSelection && !hasRange && dateStr === currentEndDate;
-    const isPending = selectionMode === 'range' && pendingRangeStart === dateStr;
-    const isEdge = hasRange && (dateStr === currentStartDate || dateStr === currentEndDate);
-    const isBetween = hasRange && dateStr > currentStartDate && dateStr < currentEndDate;
+    const isPending = pendingRangeStart === dateStr;
+    // isEdge covers both a completed range's two endpoints AND a single-day
+    // selection (start === end lands on the same cell) -- no longer a
+    // separate "single" case since every selection goes through the same
+    // pending-start-then-end flow.
+    const isEdge = hasSelection && !pendingRangeStart && (dateStr === displayStart || dateStr === displayEnd);
+    const isBetween = hasRange && !pendingRangeStart && dateStr > displayStart && dateStr < displayEnd;
 
     const classes = ['calendar-day'];
     if (isFuture) classes.push('calendar-day-future');
     else if (isPending) classes.push('calendar-day-pending');
-    else if (isEdge || isSingleSelected) classes.push('calendar-day-selected');
+    else if (isEdge) classes.push('calendar-day-selected');
     else if (isBetween) classes.push('calendar-day-in-range');
     else if (isToday) classes.push('calendar-day-today');
 
     const attrs = isFuture ? 'disabled' : `data-date="${dateStr}"`;
-    const dot = isToday && !isPending && !isEdge && !isSingleSelected ? '<span class="calendar-day-dot"></span>' : '';
+    const dot = isToday && !isPending && !isEdge ? '<span class="calendar-day-dot"></span>' : '';
     cells.push(`<button type="button" class="${classes.join(' ')}" ${attrs}>${day}${dot}</button>`);
   }
-  document.getElementById('calendarGrid').innerHTML = cells.join('');
+  document.getElementById(gridId).innerHTML = cells.join('');
 }
 
+function renderCalendar() {
+  renderCalendarHeader();
+  updateQuickRangeActive();
+  document.getElementById('calendarMonthLabelLeft').textContent = CALENDAR_MONTH_FMT.format(calendarViewDateLeft).toUpperCase();
+  document.getElementById('calendarMonthLabelRight').textContent = CALENDAR_MONTH_FMT.format(calendarViewDateRight).toUpperCase();
+  renderCalendarMonthGrid(calendarViewDateLeft, 'calendarGridLeft');
+  renderCalendarMonthGrid(calendarViewDateRight, 'calendarGridRight');
+}
+
+// Picking a start+end day only stages a DRAFT -- it neither reloads the
+// dashboard nor closes the popover. Only commitDateRange() (the Update
+// button) does that; see the top-of-section comment for why.
 function handleDayClick(dateStr) {
-  if (selectionMode === 'range') {
-    if (!pendingRangeStart) {
-      pendingRangeStart = dateStr;
-      renderCalendar();
-      return;
-    }
-    currentStartDate = pendingRangeStart < dateStr ? pendingRangeStart : dateStr;
-    currentEndDate = pendingRangeStart < dateStr ? dateStr : pendingRangeStart;
-    pendingRangeStart = null;
-  } else {
-    currentStartDate = dateStr;
-    currentEndDate = dateStr;
+  if (!pendingRangeStart) {
+    pendingRangeStart = dateStr;
+    renderCalendar();
+    return;
   }
-  hasExplicitSelection = true;
+  draftStartDate = pendingRangeStart < dateStr ? pendingRangeStart : dateStr;
+  draftEndDate = pendingRangeStart < dateStr ? dateStr : pendingRangeStart;
+  pendingRangeStart = null;
   renderCalendar();
-  pulseScale(document.querySelector('#calendarGrid .calendar-day-selected, #calendarGrid .calendar-day-pending'));
+  pulseScale(document.querySelector('#calendarTwoMonths .calendar-day-selected'));
+}
+
+function commitDateRange() {
+  if (draftStartDate && draftEndDate) {
+    currentStartDate = draftStartDate;
+    currentEndDate = draftEndDate;
+    hasExplicitSelection = true;
+  }
+  draftStartDate = null;
+  draftEndDate = null;
+  renderCalendar();
   load();
+  closeAllDatePopovers();
+}
+
+function cancelDraftRange() {
+  pendingRangeStart = null;
+  draftStartDate = null;
+  draftEndDate = null;
+  renderCalendar();
   closeAllDatePopovers();
 }
 
 function resetDateRange() {
-  selectionMode = 'single';
   pendingRangeStart = null;
+  draftStartDate = null;
+  draftEndDate = null;
   hasExplicitSelection = false;
   currentStartDate = DEFAULT_START_DATE;
   currentEndDate = DEFAULT_END_DATE;
-  calendarViewDate = new Date(currentEndDate + 'T00:00:00Z');
+  calendarViewDateLeft = monthStartUTC(currentEndDate, -1);
+  calendarViewDateRight = monthStartUTC(currentEndDate, 0);
   renderCalendar();
   load();
   closeAllDatePopovers();
 }
 
-// ---- Quick-range presets (7/14/30/60/90 days ending today) -- same idea as
-// the Spends tab's, mirrored here for the Leads dashboard's own calendar. ----
+// ---- Quick-range presets (7/14/30 days, quarter-to-date, current FY --
+// all ending today) -- same idea as the Spends tab's, mirrored here for the
+// Leads dashboard's own calendar. One-click, unambiguous actions -- these
+// still apply and close immediately, unlike a manual two-click day selection. ----
 function updateQuickRangeActive() {
   const todayStr = new Date().toISOString().slice(0, 10);
   document.querySelectorAll('#quickRangeRow .quick-range-btn').forEach(btn => {
-    const days = parseInt(btn.dataset.days, 10);
-    const expectedStart = addDaysToDateStr(todayStr, -(days - 1));
+    const expectedStart = btn.dataset.preset
+      ? (btn.dataset.preset === 'fy' ? fiscalYearStartDate() : quarterStartDate())
+      : addDaysToDateStr(todayStr, -(parseInt(btn.dataset.days, 10) - 1));
     const isActive = hasExplicitSelection && currentEndDate === todayStr && currentStartDate === expectedStart;
     btn.classList.toggle('active', isActive);
   });
@@ -724,12 +832,29 @@ function updateQuickRangeActive() {
 
 function applyQuickRange(days) {
   const todayStr = new Date().toISOString().slice(0, 10);
-  selectionMode = 'single';
   pendingRangeStart = null;
+  draftStartDate = null;
+  draftEndDate = null;
   currentEndDate = todayStr;
   currentStartDate = addDaysToDateStr(todayStr, -(days - 1));
   hasExplicitSelection = true;
-  calendarViewDate = new Date(currentEndDate + 'T00:00:00Z');
+  calendarViewDateLeft = monthStartUTC(currentEndDate, -1);
+  calendarViewDateRight = monthStartUTC(currentEndDate, 0);
+  renderCalendar();
+  load();
+  closeAllDatePopovers();
+}
+
+function applyDatePreset(preset) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  pendingRangeStart = null;
+  draftStartDate = null;
+  draftEndDate = null;
+  currentEndDate = todayStr;
+  currentStartDate = preset === 'fy' ? fiscalYearStartDate() : quarterStartDate();
+  hasExplicitSelection = true;
+  calendarViewDateLeft = monthStartUTC(currentEndDate, -1);
+  calendarViewDateRight = monthStartUTC(currentEndDate, 0);
   renderCalendar();
   load();
   closeAllDatePopovers();
@@ -769,7 +894,7 @@ async function load() {
     render();
     renderOverview();
     renderOverviewSpends();
-    renderRadar();
+    renderTalWidget();
     document.getElementById('lastUpdated').textContent = 'Updated ' + new Date(data.lastUpdated).toLocaleString();
     status.textContent = '';
   } catch (err) {
@@ -784,34 +909,47 @@ function selectRegion(regionKey) {
   render();
   renderOverview();
   renderOverviewSpends();
-  renderRadar();
+  renderTalWidget();
   smoothScrollTop();
 }
 
-document.getElementById('dateRangeBtn').addEventListener('click', () => {
-  selectionMode = selectionMode === 'range' ? 'single' : 'range';
-  pendingRangeStart = null;
-  renderCalendar();
-});
 document.getElementById('calendarResetBtn').addEventListener('click', resetDateRange);
-document.getElementById('calendarPrevBtn').addEventListener('click', () => {
-  calendarViewDate = new Date(Date.UTC(calendarViewDate.getUTCFullYear(), calendarViewDate.getUTCMonth() - 1, 1));
+document.getElementById('calendarPrevBtnLeft').addEventListener('click', () => {
+  calendarViewDateLeft = new Date(Date.UTC(calendarViewDateLeft.getUTCFullYear(), calendarViewDateLeft.getUTCMonth() - 1, 1));
   renderCalendar();
 });
-document.getElementById('calendarNextBtn').addEventListener('click', () => {
-  calendarViewDate = new Date(Date.UTC(calendarViewDate.getUTCFullYear(), calendarViewDate.getUTCMonth() + 1, 1));
+document.getElementById('calendarNextBtnLeft').addEventListener('click', () => {
+  calendarViewDateLeft = new Date(Date.UTC(calendarViewDateLeft.getUTCFullYear(), calendarViewDateLeft.getUTCMonth() + 1, 1));
   renderCalendar();
 });
-document.getElementById('calendarGrid').addEventListener('click', (e) => {
+document.getElementById('calendarPrevBtnRight').addEventListener('click', () => {
+  calendarViewDateRight = new Date(Date.UTC(calendarViewDateRight.getUTCFullYear(), calendarViewDateRight.getUTCMonth() - 1, 1));
+  renderCalendar();
+});
+document.getElementById('calendarNextBtnRight').addEventListener('click', () => {
+  calendarViewDateRight = new Date(Date.UTC(calendarViewDateRight.getUTCFullYear(), calendarViewDateRight.getUTCMonth() + 1, 1));
+  renderCalendar();
+});
+document.getElementById('calendarApplyBtn').addEventListener('click', commitDateRange);
+document.getElementById('calendarCancelBtn').addEventListener('click', cancelDraftRange);
+document.getElementById('calendarTwoMonths').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-date]');
   if (!btn) return;
+  // Without this, renderCalendar()'s innerHTML swap (triggered by
+  // handleDayClick below) detaches this very button from the DOM before the
+  // click finishes bubbling, which breaks the outside-click listener's
+  // `.closest('.date-range-control')` check and closes the popover right
+  // after the FIRST (start-date) click -- stopping propagation here means
+  // that document-level listener never sees this click at all.
+  e.stopPropagation();
   handleDayClick(btn.dataset.date);
 });
 document.getElementById('quickRangeRow').addEventListener('click', (e) => {
   const btn = e.target.closest('.quick-range-btn');
   if (!btn) return;
   pulseScale(btn);
-  applyQuickRange(parseInt(btn.dataset.days, 10));
+  if (btn.dataset.preset) applyDatePreset(btn.dataset.preset);
+  else applyQuickRange(parseInt(btn.dataset.days, 10));
 });
 
 // ---- Date-range popover -- a LinkedIn/Meta-Ads-Campaign-Manager-style
@@ -824,22 +962,38 @@ document.getElementById('quickRangeRow').addEventListener('click', (e) => {
 function closeAllDatePopovers() {
   document.querySelectorAll('.date-popover').forEach(p => p.classList.add('hidden'));
 }
-function toggleDatePopover(id) {
+function toggleDatePopover(id, onOpen) {
   const el = document.getElementById(id);
   const wasHidden = el.classList.contains('hidden');
   closeAllDatePopovers();
-  if (wasHidden) el.classList.remove('hidden');
+  if (wasHidden) {
+    el.classList.remove('hidden');
+    if (onOpen) onOpen();
+  }
 }
+// Reopening always discards any abandoned draft/half-made click (a start
+// date picked but never confirmed with Update) and shows whatever range is
+// actually applied -- an unconfirmed draft is never silently carried over.
 document.getElementById('dateRangeTriggerLeads').addEventListener('click', (e) => {
   e.stopPropagation();
-  toggleDatePopover('datePopoverLeads');
+  toggleDatePopover('datePopoverLeads', () => {
+    pendingRangeStart = null;
+    draftStartDate = null;
+    draftEndDate = null;
+    renderCalendar();
+  });
 });
 document.getElementById('dateRangeTriggerSpends').addEventListener('click', (e) => {
   e.stopPropagation();
-  toggleDatePopover('datePopoverSpends');
+  toggleDatePopover('datePopoverSpends', () => {
+    spendsPendingRangeStart = null;
+    spendsDraftStartDate = null;
+    spendsDraftEndDate = null;
+    spendsRenderCalendar();
+  });
 });
 document.addEventListener('click', (e) => {
-  if (e.target.closest('.date-range-control')) return;
+  if (e.target.closest('.date-range-control') || e.target.closest('.compare-custom-control')) return;
   closeAllDatePopovers();
 });
 document.addEventListener('keydown', (e) => {
@@ -912,9 +1066,12 @@ function closeLeadModal() {
   gsap.to(leadModal, { autoAlpha: 0, duration: 0.22, ease: 'power2.in', onComplete: () => leadModal.classList.add('hidden') });
 }
 
-document.getElementById('app').addEventListener('click', (e) => {
+// Delegated on `document`, not `#app` -- the TAL/Non-TAL widget's cards live
+// in the static #leadsView markup outside #app (which only ever holds the
+// pivot table), so a listener scoped to #app would miss clicks on them.
+document.addEventListener('click', (e) => {
   const cell = e.target.closest('.pivot-cell-clickable');
-  if (!cell) return;
+  if (!cell || !cell.dataset.records) return;
   const records = JSON.parse(decodeURIComponent(cell.dataset.records));
   const statusLabel = cell.dataset.statusLabel || '';
   openLeadModal(records, statusLabel);
@@ -936,21 +1093,37 @@ let spendsActiveRegion = 'India';
 let spendsActiveChannel = 'linkedin';
 let spendsLastData = null;
 let spendsGroupExpanded = true;
+let spendsExpandedCampaigns = new Set();
+let spendsSearchQuery = '';
+// Campaign names checked via the row checkboxes -- when non-empty, KPI tiles
+// and the footer total narrow to just these (still within whatever the
+// search box currently matches), instead of the full region/channel totals.
+let spendsSelectedCampaigns = new Set();
 
-let spendsSelectionMode = 'single';
 let spendsPendingRangeStart = null;
+let spendsDraftStartDate = null;
+let spendsDraftEndDate = null;
 let spendsHasExplicitSelection = false;
 let spendsStartDate = SPENDS_DEFAULT_START_DATE;
 let spendsEndDate = SPENDS_DEFAULT_END_DATE;
-let spendsCalendarViewDate = new Date(spendsEndDate + 'T00:00:00Z');
+let spendsCalendarViewDateLeft = monthStartUTC(spendsEndDate, -1);
+let spendsCalendarViewDateRight = monthStartUTC(spendsEndDate, 0);
 
-// ---- Period-over-period comparison -- only offered for a handful of round
-// window lengths (7 days / 2 weeks / 1 month / 3 months); anything else (an
-// arbitrary custom range) gets no compare toggle at all, since "previous
-// period" is ambiguous otherwise. ----
+// ---- Period-over-period comparison -- two modes:
+//   'auto'   -- previous N days immediately before the selected range, only
+//               offered when that range is 1-30 days (otherwise "previous
+//               period" is ambiguous, so no auto button is shown at all).
+//   'custom' -- an arbitrary comparison range the user picks on its own mini
+//               calendar, independent of the primary range's length -- lets
+//               e.g. "this month" be compared against "the same month last
+//               year" or any other hand-picked window.
+// Only one mode is active at a time; spendsPrevData holds whichever
+// comparison period's full /api/clg-spends response is currently loaded. ----
 let spendsComparePeriod = null; // detected {days, label} for the current range, or null
-let spendsCompareEnabled = false;
-let spendsPrevData = null; // full /api/clg-spends response for the immediately-preceding period of the same length
+let spendsCompareMode = null; // null | 'auto' | 'custom'
+let spendsPrevData = null;
+let spendsCustomCompareStart = null;
+let spendsCustomCompareEnd = null;
 
 function spendsDetectPeriod(startDate, endDate) {
   const start = new Date(startDate + 'T00:00:00Z');
@@ -980,29 +1153,42 @@ function deltaBadgeHtml(curr, prev) {
 }
 
 function spendsGetPrevChannelData() {
-  if (!spendsCompareEnabled || !spendsPrevData) return null;
+  if (!spendsCompareMode || !spendsPrevData) return null;
   return spendsGetChannelData(spendsPrevData, spendsActiveRegion, spendsActiveChannel);
 }
 
+// Runs on every load (region/channel/date-range change) -- keeps the 'auto'
+// button's availability/label in sync with the current primary range, and
+// auto-disables 'auto' mode if the range grows past 30 days (undefined
+// "previous period"). A 'custom' comparison is independent of the primary
+// range's length, so it's left alone here.
 function spendsUpdateCompareToggle() {
   spendsComparePeriod = spendsDetectPeriod(spendsStartDate, spendsEndDate);
   const btn = document.getElementById('spendsCompareToggle');
   const closeBtn = document.getElementById('spendsCompareClose');
+  const customBtn = document.getElementById('spendsCompareCustomBtn');
+
   if (!spendsComparePeriod) {
     btn.classList.add('hidden');
-    closeBtn.classList.add('hidden');
-    spendsCompareEnabled = false;
-    spendsPrevData = null;
-    return;
+    if (spendsCompareMode === 'auto') { spendsCompareMode = null; spendsPrevData = null; }
+  } else {
+    btn.textContent = `Compare with previous ${spendsComparePeriod.label}`;
+    btn.classList.remove('hidden');
+    btn.classList.toggle('active', spendsCompareMode === 'auto');
   }
-  btn.textContent = `Compare with previous ${spendsComparePeriod.label}`;
-  btn.classList.remove('hidden');
-  btn.classList.toggle('active', spendsCompareEnabled);
-  closeBtn.classList.toggle('hidden', !spendsCompareEnabled);
+
+  customBtn.classList.toggle('active', spendsCompareMode === 'custom');
+  document.getElementById('spendsCompareCustomLabel').textContent = spendsCompareMode === 'custom'
+    ? `Comparing vs ${RANGE_DATE_FMT.format(new Date(spendsCustomCompareStart + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(spendsCustomCompareEnd + 'T00:00:00Z'))}`
+    : 'Compare with custom range';
+
+  closeBtn.classList.toggle('hidden', !spendsCompareMode);
 }
 
 async function spendsFetchPrevIfNeeded() {
-  if (!spendsCompareEnabled || !spendsComparePeriod) { spendsPrevData = null; return; }
+  // 'custom' mode's data is fixed to the user-picked comparison range, not
+  // tied to the primary range -- only 'auto' mode needs a refetch here.
+  if (spendsCompareMode !== 'auto' || !spendsComparePeriod) return;
   const prevEnd = addDaysToDateStr(spendsStartDate, -1);
   const prevStart = addDaysToDateStr(prevEnd, -(spendsComparePeriod.days - 1));
   try {
@@ -1014,111 +1200,124 @@ async function spendsFetchPrevIfNeeded() {
   }
 }
 
-function spendsUpdateRangeLabel() {
-  const label = document.getElementById('spendsDateRangeValue');
-  const hasRange = spendsHasExplicitSelection && spendsStartDate !== spendsEndDate;
-  if (!spendsHasExplicitSelection || !hasRange) {
-    label.textContent = DATE_LABEL_FMT.format(new Date(spendsEndDate + 'T00:00:00Z'));
-  } else {
-    label.textContent = `${RANGE_DATE_FMT.format(new Date(spendsStartDate + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(spendsEndDate + 'T00:00:00Z'))}`;
-  }
-}
-
 function spendsRenderCalendarHeader() {
-  document.getElementById('spendsCalendarMonthLabel').textContent = CALENDAR_MONTH_FMT.format(spendsCalendarViewDate).toUpperCase();
-  document.getElementById('spendsDateRangeBtn').classList.toggle('active', spendsSelectionMode === 'range');
   document.getElementById('dateRangeTriggerLabelSpends').textContent = formatDateRangeLabel(spendsStartDate, spendsEndDate);
 
+  const hasDraft = spendsDraftStartDate && spendsDraftEndDate;
   const hasRange = spendsHasExplicitSelection && spendsStartDate !== spendsEndDate;
   const rangePill = document.getElementById('spendsCalendarRangePill');
-  if (hasRange) {
-    rangePill.textContent = `${RANGE_DATE_FMT.format(new Date(spendsStartDate + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(spendsEndDate + 'T00:00:00Z'))}`;
+  if (hasDraft) {
+    rangePill.textContent = spendsDraftStartDate === spendsDraftEndDate
+      ? DATE_LABEL_FMT.format(new Date(spendsDraftEndDate + 'T00:00:00Z'))
+      : `${RANGE_DATE_FMT.format(new Date(spendsDraftStartDate + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(spendsDraftEndDate + 'T00:00:00Z'))}`;
     rangePill.classList.remove('hidden');
   } else if (spendsPendingRangeStart) {
     rangePill.textContent = `From ${RANGE_DATE_FMT.format(new Date(spendsPendingRangeStart + 'T00:00:00Z'))} — pick end date`;
+    rangePill.classList.remove('hidden');
+  } else if (hasRange) {
+    rangePill.textContent = `${RANGE_DATE_FMT.format(new Date(spendsStartDate + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(spendsEndDate + 'T00:00:00Z'))}`;
+    rangePill.classList.remove('hidden');
+  } else if (spendsHasExplicitSelection) {
+    rangePill.textContent = DATE_LABEL_FMT.format(new Date(spendsEndDate + 'T00:00:00Z'));
     rangePill.classList.remove('hidden');
   } else {
     rangePill.classList.add('hidden');
   }
 
-  document.getElementById('spendsCalendarResetBtn').classList.toggle('hidden', !(spendsSelectionMode === 'range' || hasRange));
-
-  const singleLabel = document.getElementById('spendsDateRangeValue');
-  if (spendsSelectionMode === 'single' && !hasRange && spendsHasExplicitSelection) {
-    singleLabel.textContent = DATE_LABEL_FMT.format(new Date(spendsEndDate + 'T00:00:00Z'));
-    singleLabel.classList.remove('hidden');
-  } else {
-    singleLabel.classList.add('hidden');
-  }
-
-  document.getElementById('spendsCalendarHelperText').classList.toggle('hidden', !(spendsSelectionMode === 'range' && !spendsPendingRangeStart));
+  document.getElementById('spendsCalendarResetBtn').classList.toggle('hidden', !(spendsPendingRangeStart || spendsHasExplicitSelection));
+  document.getElementById('spendsCalendarHelperText').classList.toggle('hidden', !!spendsPendingRangeStart || !!hasDraft);
+  document.getElementById('spendsCalendarApplyRow').classList.toggle('hidden', !hasDraft);
 }
 
-function spendsRenderCalendar() {
-  spendsRenderCalendarHeader();
-  spendsUpdateQuickRangeActive();
-
-  const year = spendsCalendarViewDate.getUTCFullYear();
-  const month = spendsCalendarViewDate.getUTCMonth();
+function spendsRenderCalendarMonthGrid(viewDate, gridId) {
+  const year = viewDate.getUTCFullYear();
+  const month = viewDate.getUTCMonth();
   const firstOfMonth = new Date(Date.UTC(year, month, 1));
   const leadingBlanks = (firstOfMonth.getUTCDay() + 6) % 7;
   const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
 
   const todayStr = new Date().toISOString().slice(0, 10);
-  const hasRange = spendsHasExplicitSelection && spendsStartDate !== spendsEndDate;
+  const hasDraft = spendsDraftStartDate && spendsDraftEndDate;
+  const displayStart = hasDraft ? spendsDraftStartDate : spendsStartDate;
+  const displayEnd = hasDraft ? spendsDraftEndDate : spendsEndDate;
+  const hasSelection = hasDraft || spendsHasExplicitSelection;
+  const hasRange = hasSelection && displayStart !== displayEnd;
   const cells = [];
   for (let i = 0; i < leadingBlanks; i++) cells.push('<span class="calendar-day calendar-day-blank"></span>');
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const isFuture = dateStr > todayStr;
     const isToday = dateStr === todayStr;
-    const isSingleSelected = spendsSelectionMode === 'single' && spendsHasExplicitSelection && !hasRange && dateStr === spendsEndDate;
-    const isPending = spendsSelectionMode === 'range' && spendsPendingRangeStart === dateStr;
-    const isEdge = hasRange && (dateStr === spendsStartDate || dateStr === spendsEndDate);
-    const isBetween = hasRange && dateStr > spendsStartDate && dateStr < spendsEndDate;
+    const isPending = spendsPendingRangeStart === dateStr;
+    const isEdge = hasSelection && !spendsPendingRangeStart && (dateStr === displayStart || dateStr === displayEnd);
+    const isBetween = hasRange && !spendsPendingRangeStart && dateStr > displayStart && dateStr < displayEnd;
 
     const classes = ['calendar-day'];
     if (isFuture) classes.push('calendar-day-future');
     else if (isPending) classes.push('calendar-day-pending');
-    else if (isEdge || isSingleSelected) classes.push('calendar-day-selected');
+    else if (isEdge) classes.push('calendar-day-selected');
     else if (isBetween) classes.push('calendar-day-in-range');
     else if (isToday) classes.push('calendar-day-today');
 
     const attrs = isFuture ? 'disabled' : `data-date="${dateStr}"`;
-    const dot = isToday && !isPending && !isEdge && !isSingleSelected ? '<span class="calendar-day-dot"></span>' : '';
+    const dot = isToday && !isPending && !isEdge ? '<span class="calendar-day-dot"></span>' : '';
     cells.push(`<button type="button" class="${classes.join(' ')}" ${attrs}>${day}${dot}</button>`);
   }
-  document.getElementById('spendsCalendarGrid').innerHTML = cells.join('');
+  document.getElementById(gridId).innerHTML = cells.join('');
+}
+
+function spendsRenderCalendar() {
+  spendsRenderCalendarHeader();
+  spendsUpdateQuickRangeActive();
+  document.getElementById('spendsCalendarMonthLabelLeft').textContent = CALENDAR_MONTH_FMT.format(spendsCalendarViewDateLeft).toUpperCase();
+  document.getElementById('spendsCalendarMonthLabelRight').textContent = CALENDAR_MONTH_FMT.format(spendsCalendarViewDateRight).toUpperCase();
+  spendsRenderCalendarMonthGrid(spendsCalendarViewDateLeft, 'spendsCalendarGridLeft');
+  spendsRenderCalendarMonthGrid(spendsCalendarViewDateRight, 'spendsCalendarGridRight');
 }
 
 function spendsHandleDayClick(dateStr) {
-  if (spendsSelectionMode === 'range') {
-    if (!spendsPendingRangeStart) {
-      spendsPendingRangeStart = dateStr;
-      spendsRenderCalendar();
-      return;
-    }
-    spendsStartDate = spendsPendingRangeStart < dateStr ? spendsPendingRangeStart : dateStr;
-    spendsEndDate = spendsPendingRangeStart < dateStr ? dateStr : spendsPendingRangeStart;
-    spendsPendingRangeStart = null;
-  } else {
-    spendsStartDate = dateStr;
-    spendsEndDate = dateStr;
+  if (!spendsPendingRangeStart) {
+    spendsPendingRangeStart = dateStr;
+    spendsRenderCalendar();
+    return;
   }
-  spendsHasExplicitSelection = true;
+  spendsDraftStartDate = spendsPendingRangeStart < dateStr ? spendsPendingRangeStart : dateStr;
+  spendsDraftEndDate = spendsPendingRangeStart < dateStr ? dateStr : spendsPendingRangeStart;
+  spendsPendingRangeStart = null;
   spendsRenderCalendar();
-  pulseScale(document.querySelector('#spendsCalendarGrid .calendar-day-selected, #spendsCalendarGrid .calendar-day-pending'));
+  pulseScale(document.querySelector('#spendsCalendarTwoMonths .calendar-day-selected'));
+}
+
+function spendsCommitDateRange() {
+  if (spendsDraftStartDate && spendsDraftEndDate) {
+    spendsStartDate = spendsDraftStartDate;
+    spendsEndDate = spendsDraftEndDate;
+    spendsHasExplicitSelection = true;
+  }
+  spendsDraftStartDate = null;
+  spendsDraftEndDate = null;
+  spendsRenderCalendar();
   spendsLoad();
   closeAllDatePopovers();
 }
 
-function spendsResetDateRange() {
-  spendsSelectionMode = 'single';
+function spendsCancelDraftRange() {
   spendsPendingRangeStart = null;
+  spendsDraftStartDate = null;
+  spendsDraftEndDate = null;
+  spendsRenderCalendar();
+  closeAllDatePopovers();
+}
+
+function spendsResetDateRange() {
+  spendsPendingRangeStart = null;
+  spendsDraftStartDate = null;
+  spendsDraftEndDate = null;
   spendsHasExplicitSelection = false;
   spendsStartDate = SPENDS_DEFAULT_START_DATE;
   spendsEndDate = SPENDS_DEFAULT_END_DATE;
-  spendsCalendarViewDate = new Date(spendsEndDate + 'T00:00:00Z');
+  spendsCalendarViewDateLeft = monthStartUTC(spendsEndDate, -1);
+  spendsCalendarViewDateRight = monthStartUTC(spendsEndDate, 0);
   spendsRenderCalendar();
   spendsLoad();
   closeAllDatePopovers();
@@ -1136,9 +1335,20 @@ function spendsPopulateRegionSelect() {
   sel.value = spendsActiveRegion;
 }
 
+function spendsClearCampaignSearch() {
+  clearTimeout(spendsSearchDebounceTimer);
+  spendsSearchQuery = '';
+  const input = document.getElementById('spendsCampaignSearch');
+  if (input) input.value = '';
+  const clearBtn = document.getElementById('spendsCampaignSearchClear');
+  if (clearBtn) clearBtn.classList.add('hidden');
+}
+
 function spendsSelectRegion(regionKey) {
   spendsActiveRegion = regionKey;
   document.getElementById('regionSelectSpends').value = regionKey;
+  spendsClearCampaignSearch();
+  spendsClearSelection();
   spendsRender();
 }
 
@@ -1159,12 +1369,15 @@ function spendsDeriveMessagingRatesClient(t) {
   const uniqueClickedPct = t.delivered > 0 ? (t.uniqueClicked / t.delivered) * 100 : 0;
   return { ...t, deliveredPct, uniqueOpenedPct, uniqueClickedPct };
 }
+const SPENDS_TOTAL_KEYS = {
+  paid: ['spend', 'clicks', 'impressions'],
+  messaging: ['sent', 'delivered', 'totalOpened', 'uniqueOpened', 'totalClicked', 'uniqueClicked'],
+};
+
 function spendsAggregateChannel(dataset, channel) {
   const isMsg = MESSAGING_CHANNELS.has(channel);
   const regions = (isMsg ? SPENDS_MESSAGING_REGIONS : REGIONS).map(r => r.key);
-  const totalKeys = isMsg
-    ? ['sent', 'delivered', 'totalOpened', 'uniqueOpened', 'totalClicked', 'uniqueClicked']
-    : ['spend', 'clicks', 'impressions'];
+  const totalKeys = SPENDS_TOTAL_KEYS[isMsg ? 'messaging' : 'paid'];
   const totals = {};
   totalKeys.forEach(k => { totals[k] = 0; });
   const campaigns = [];
@@ -1178,6 +1391,18 @@ function spendsAggregateChannel(dataset, channel) {
   const kpi = isMsg ? spendsDeriveMessagingRatesClient(totals) : spendsDeriveRatesClient(totals);
   campaigns.sort((a, b) => isMsg ? b.sent - a.sent : b.spend - a.spend);
   return { kpi, campaigns };
+}
+
+// Re-derives a KPI object from an arbitrary subset of campaigns (search
+// results, a checkbox selection, or both) -- same "sum raw counts, re-derive
+// rates" rule as spendsAggregateChannel, just over a caller-picked list
+// instead of every campaign in the channel.
+function spendsComputeKpiForCampaigns(campaignsList, isMsg) {
+  const totalKeys = SPENDS_TOTAL_KEYS[isMsg ? 'messaging' : 'paid'];
+  const totals = {};
+  totalKeys.forEach(k => { totals[k] = 0; });
+  for (const c of campaignsList) for (const k of totalKeys) totals[k] += c[k] || 0;
+  return isMsg ? spendsDeriveMessagingRatesClient(totals) : spendsDeriveRatesClient(totals);
 }
 // Resolves the channel data to render, whether that's one region's own
 // response or the "All Regions" aggregate above -- every call site that used
@@ -1217,6 +1442,13 @@ const SPENDS_KPI_CONFIG = {
   ],
 };
 
+// 'leadCount'/'ndlCount'/'dlCount' are campaign -> Leads-tab attributions
+// (matched on the lead's Source field against the campaign's own name -- see
+// buildLeadsBySource in api/clg-spends.js), not metrics native to the ad
+// platform sheets, so they're flagged separately (isClickableCount) to render
+// as a clickable cell reusing the existing lead-detail modal, same as the
+// Leads tab's Status cells. NDL = Non Demo Lead (NDL__c), DL = Disqualified
+// Lead (Status === 'Disqualified MQL').
 const SPENDS_TABLE_COLUMNS = {
   paid: [
     { key: 'spend', label: 'Amount Spent', fmt: fmtCurrency },
@@ -1225,6 +1457,9 @@ const SPENDS_TABLE_COLUMNS = {
     { key: 'ctr', label: 'CTR', fmt: v => `${fmtDec(v)}%` },
     { key: 'cpm', label: 'CPM', fmt: fmtCurrency },
     { key: 'cpc', label: 'CPC', fmt: fmtCurrency },
+    { key: 'leadCount', recordsKey: 'leadRecords', label: 'Leads', fmt: fmtInt, isClickableCount: true },
+    { key: 'ndlCount', recordsKey: 'ndlRecords', label: 'NDL', fmt: fmtInt, isClickableCount: true },
+    { key: 'dlCount', recordsKey: 'dlRecords', label: 'DL', fmt: fmtInt, isClickableCount: true },
   ],
   messaging: [
     { key: 'sent', label: 'Sent', fmt: fmtInt },
@@ -1236,6 +1471,9 @@ const SPENDS_TABLE_COLUMNS = {
     { key: 'totalClicked', label: 'Total Clicked', fmt: fmtInt },
     { key: 'uniqueClicked', label: 'Unique Clicked', fmt: fmtInt },
     { key: 'uniqueClickedPct', label: 'Unique Clicked %', fmt: v => `${fmtDec(v)}%` },
+    { key: 'leadCount', recordsKey: 'leadRecords', label: 'Leads', fmt: fmtInt, isClickableCount: true },
+    { key: 'ndlCount', recordsKey: 'ndlRecords', label: 'NDL', fmt: fmtInt, isClickableCount: true },
+    { key: 'dlCount', recordsKey: 'dlRecords', label: 'DL', fmt: fmtInt, isClickableCount: true },
   ],
 };
 
@@ -1270,53 +1508,159 @@ function spendsToggleGroup() {
   spendsRenderTable();
 }
 
-function spendsRenderTable() {
+function spendsToggleCampaign(name) {
+  if (spendsExpandedCampaigns.has(name)) spendsExpandedCampaigns.delete(name);
+  else spendsExpandedCampaigns.add(name);
+  spendsRenderTable();
+}
+
+// Renders a Leads/NDL/DL column's cell -- clickable (reusing the same lead-
+// detail modal as the Leads tab's Status cells) when the campaign actually
+// produced records for that stat, a plain 0 otherwise, and a dash on creative
+// rows (the campaign -> lead attribution is campaign-level only; a lead's
+// Source field holds the campaign name, never a specific creative).
+function spendsClickableCountCellHtml(col, record) {
+  const records = record[col.recordsKey];
+  if (!records) return `<td class="spends-td-nolead">&mdash;</td>`;
+  const count = record[col.key] || 0;
+  if (count <= 0) return `<td>${col.fmt(count)}</td>`;
+  const dataRecords = encodeURIComponent(JSON.stringify(records));
+  return `<td><span class="pivot-cell-clickable" data-records="${dataRecords}" data-status-label="${escapeHtml(col.label)} from ${escapeHtml(record.name)}">${col.fmt(count)}</span></td>`;
+}
+
+function spendsToggleCampaignSelected(name, checked) {
+  if (checked) spendsSelectedCampaigns.add(name);
+  else spendsSelectedCampaigns.delete(name);
+  spendsRenderTable(true);
+}
+
+function spendsClearSelection() {
+  spendsSelectedCampaigns.clear();
+}
+
+function spendsRenderTable(skipRowAnim) {
   if (!spendsLastData) return;
   const channelData = spendsGetChannelData(spendsLastData, spendsActiveRegion, spendsActiveChannel);
-  const campaigns = channelData.campaigns;
-  const kpi = channelData.kpi;
+  const allCampaigns = channelData.campaigns;
+  const query = spendsSearchQuery.trim().toLowerCase();
+  const campaigns = query ? allCampaigns.filter(c => c.name.toLowerCase().includes(query)) : allCampaigns;
+  const isMsg = spendsIsMessaging();
+
+  // Totals (KPI tiles + footer row) reflect the checkbox selection when one
+  // exists (scoped to whatever the search currently matches), else just the
+  // search-filtered rows, else the whole channel -- this is also the fix for
+  // totals previously always showing the full unfiltered channel regardless
+  // of an active search.
+  const hasSelection = spendsSelectedCampaigns.size > 0;
+  const effectiveCampaigns = hasSelection ? campaigns.filter(c => spendsSelectedCampaigns.has(c.name)) : campaigns;
+  const kpi = spendsComputeKpiForCampaigns(effectiveCampaigns, isMsg);
+
   const prevChannelData = spendsGetPrevChannelData();
-  const prevKpi = prevChannelData ? prevChannelData.kpi : null;
   const prevByName = new Map((prevChannelData ? prevChannelData.campaigns : []).map(c => [c.name, c]));
   // Only render a delta at all once comparison is on for this range -- an
   // undefined prev value (vs. a real 0) tells deltaBadgeHtml to render nothing.
   const prevFor = (name, key) => prevChannelData ? ((prevByName.get(name) || { [key]: 0 })[key]) : undefined;
+  const prevKpi = prevChannelData
+    ? spendsComputeKpiForCampaigns(effectiveCampaigns.map(c => prevByName.get(c.name) || {}), isMsg)
+    : null;
 
-  const cols = SPENDS_TABLE_COLUMNS[spendsIsMessaging() ? 'messaging' : 'paid'];
+  spendsUpdateKpiTiles(kpi, prevKpi);
+
+  const cols = SPENDS_TABLE_COLUMNS[isMsg ? 'messaging' : 'paid'];
 
   document.getElementById('spendsTableHead').innerHTML = `
     <tr>
+      <th class="spends-th-check"><input type="checkbox" id="spendsSelectAllCheckbox" title="Select all"></th>
       <th class="pin pin-quarter spends-th-name">Campaign Name</th>
       ${cols.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}
     </tr>
   `;
+  const selectAllBox = document.getElementById('spendsSelectAllCheckbox');
+  const allChecked = campaigns.length > 0 && campaigns.every(c => spendsSelectedCampaigns.has(c.name));
+  selectAllBox.checked = allChecked;
+  selectAllBox.indeterminate = !allChecked && campaigns.some(c => spendsSelectedCampaigns.has(c.name));
+  selectAllBox.onchange = (e) => {
+    if (e.target.checked) campaigns.forEach(c => spendsSelectedCampaigns.add(c.name));
+    else campaigns.forEach(c => spendsSelectedCampaigns.delete(c.name));
+    spendsRenderTable(true);
+  };
 
-  const metaHeadline = spendsIsMessaging() ? `${cols[0].fmt(kpi[cols[0].key])} sent` : cols[0].fmt(kpi[cols[0].key]);
+  const metaHeadline = isMsg ? `${cols[0].fmt(kpi[cols[0].key])} sent` : cols[0].fmt(kpi[cols[0].key]);
   document.getElementById('spendsGroupTitle').textContent = `${spendsActiveRegion} Campaigns`;
-  document.getElementById('spendsGroupMeta').textContent = `${campaigns.length} campaign${campaigns.length === 1 ? '' : 's'} · ${metaHeadline}`;
+  const metaParts = [];
+  if (query) metaParts.push(`${campaigns.length} of ${allCampaigns.length} campaign${allCampaigns.length === 1 ? '' : 's'} matching "${spendsSearchQuery.trim()}"`);
+  else metaParts.push(`${campaigns.length} campaign${campaigns.length === 1 ? '' : 's'}`);
+  if (hasSelection) metaParts.push(`${effectiveCampaigns.length} selected`);
+  else metaParts.push(metaHeadline);
+  document.getElementById('spendsGroupMeta').textContent = metaParts.join(' · ');
   document.querySelector('.spends-group-arrow').innerHTML = spendsGroupExpanded ? '&#9662;' : '&#9656;';
   document.getElementById('spendsTableWrap').classList.toggle('hidden', !spendsGroupExpanded);
 
   const tbody = document.getElementById('spendsTableBody');
   tbody.innerHTML = campaigns.length
-    ? campaigns.map(c => `
-      <tr>
-        <td class="pin pin-quarter spends-td-name" title="${escapeHtml(c.name)}">${escapeHtml(c.name)}</td>
-        ${cols.map(col => `<td>${col.fmt(c[col.key])}${deltaBadgeHtml(c[col.key], prevFor(c.name, col.key))}</td>`).join('')}
-      </tr>
-    `).join('')
-    : `<tr><td colspan="${cols.length + 1}" class="empty">No matching campaigns in this range.</td></tr>`;
+    ? campaigns.map((c, i) => {
+      const hasCreatives = Array.isArray(c.creatives) && c.creatives.length > 0;
+      const expanded = hasCreatives && spendsExpandedCampaigns.has(c.name);
+      const checked = spendsSelectedCampaigns.has(c.name);
+      const campaignRow = `
+        <tr class="spends-campaign-row${hasCreatives ? ' has-creatives' : ''}" data-idx="${i}">
+          <td class="spends-td-check"><input type="checkbox" class="spends-campaign-checkbox" data-name="${escapeHtml(c.name)}" ${checked ? 'checked' : ''}></td>
+          <td class="pin pin-quarter spends-td-name" title="${escapeHtml(c.name)}">
+            ${hasCreatives ? `<span class="spends-creative-arrow">${expanded ? '&#9662;' : '&#9656;'}</span>` : '<span class="spends-creative-arrow spends-creative-arrow-empty"></span>'}
+            ${escapeHtml(c.name)}
+          </td>
+          ${cols.map(col => col.isClickableCount ? spendsClickableCountCellHtml(col, c) : `<td>${col.fmt(c[col.key])}${deltaBadgeHtml(c[col.key], prevFor(c.name, col.key))}</td>`).join('')}
+        </tr>
+      `;
+      const creativeRows = expanded ? c.creatives.map(cr => `
+        <tr class="spends-creative-row">
+          <td class="spends-td-check"></td>
+          <td class="pin pin-quarter spends-td-name spends-td-creative" title="${escapeHtml(cr.name)}">${escapeHtml(cr.name)}</td>
+          ${cols.map(col => col.isClickableCount ? spendsClickableCountCellHtml(col, cr) : `<td>${col.fmt(cr[col.key])}</td>`).join('')}
+        </tr>
+      `).join('') : '';
+      return campaignRow + creativeRows;
+    }).join('')
+    : `<tr><td colspan="${cols.length + 2}" class="empty">${query ? `No campaigns match "${escapeHtml(spendsSearchQuery.trim())}".` : 'No matching campaigns in this range.'}</td></tr>`;
 
+  tbody.onclick = (e) => {
+    // A click on the Leads/NDL/DL cell is handled by the page-level
+    // pivot-cell-clickable listener (opens the lead modal); a click on a
+    // checkbox toggles selection -- neither should also toggle this row's
+    // creative expand/collapse.
+    if (e.target.closest('.pivot-cell-clickable')) return;
+    const checkbox = e.target.closest('.spends-campaign-checkbox');
+    if (checkbox) { spendsToggleCampaignSelected(checkbox.dataset.name, checkbox.checked); return; }
+    const row = e.target.closest('.spends-campaign-row.has-creatives');
+    if (!row) return;
+    const c = campaigns[+row.dataset.idx];
+    if (c) spendsToggleCampaign(c.name);
+  };
+
+  const totalLeadCount = effectiveCampaigns.reduce((sum, c) => sum + (c.leadCount || 0), 0);
+  const totalNdlCount = effectiveCampaigns.reduce((sum, c) => sum + (c.ndlCount || 0), 0);
+  const totalDlCount = effectiveCampaigns.reduce((sum, c) => sum + (c.dlCount || 0), 0);
+  const clickableTotals = { leadCount: totalLeadCount, ndlCount: totalNdlCount, dlCount: totalDlCount };
   const tfoot = document.getElementById('spendsTableFoot');
   tfoot.innerHTML = campaigns.length ? `
     <tr class="pivot-total-row">
-      <td class="pin pin-quarter">Total</td>
-      ${cols.map(col => `<td>${col.fmt(kpi[col.key])}${prevKpi ? deltaBadgeHtml(kpi[col.key], prevKpi[col.key]) : ''}</td>`).join('')}
+      <td class="spends-td-check"></td>
+      <td class="pin pin-quarter">Total${hasSelection ? ' (selected)' : ''}</td>
+      ${cols.map(col => col.isClickableCount
+        ? `<td>${fmtInt(clickableTotals[col.key])}</td>`
+        : `<td>${col.fmt(kpi[col.key])}${prevKpi ? deltaBadgeHtml(kpi[col.key], prevKpi[col.key]) : ''}</td>`
+      ).join('')}
     </tr>
   ` : '';
 
-  animateRowsIn(tbody.querySelectorAll('tr'));
-  animateBadgesIn(document.querySelectorAll('#spendsTableBody .kpi-delta, #spendsTableFoot .kpi-delta'), 0.15);
+  // Search-driven re-renders skip the fade-in stagger -- restarting that
+  // animation on every keystroke was the "too quick / not pleasing" feel
+  // being reported: rows would flash invisible-then-fade on each character
+  // instead of just smoothly updating in place.
+  if (!skipRowAnim) {
+    animateRowsIn(tbody.querySelectorAll('tr'));
+    animateBadgesIn(document.querySelectorAll('#spendsTableBody .kpi-delta, #spendsTableFoot .kpi-delta'), 0.15);
+  }
 }
 
 function spendsSetKpiDelta(elId, curr, prev) {
@@ -1327,13 +1671,10 @@ function spendsSetKpiDelta(elId, curr, prev) {
   if (el.firstElementChild) animateBadgesIn([el.firstElementChild], 0);
 }
 
-function spendsRender() {
-  if (!spendsLastData) return;
-  const channelData = spendsGetChannelData(spendsLastData, spendsActiveRegion, spendsActiveChannel);
-  const kpi = channelData.kpi;
-  const prevChannelData = spendsGetPrevChannelData();
-  const prevKpi = prevChannelData ? prevChannelData.kpi : null;
-
+// Shared by spendsRender (region/channel/load changes, full channel totals)
+// and spendsRenderTable (search/selection changes, filtered totals) so the
+// KPI tiles always match whatever the table's footer total is showing.
+function spendsUpdateKpiTiles(kpi, prevKpi) {
   const config = SPENDS_KPI_CONFIG[spendsIsMessaging() ? 'messaging' : 'paid'];
   config.forEach(tile => {
     document.getElementById(tile.labelId).textContent = tile.label;
@@ -1341,8 +1682,12 @@ function spendsRender() {
     document.getElementById(tile.valueId).textContent = tile.fmt(tile.get(kpi));
     spendsSetKpiDelta(tile.deltaId, tile.get(kpi), prevKpi ? tile.get(prevKpi) : null);
   });
+}
 
-  spendsRenderRadar(kpi, channelData.campaigns.length);
+function spendsRender() {
+  if (!spendsLastData) return;
+  const channelData = spendsGetChannelData(spendsLastData, spendsActiveRegion, spendsActiveChannel);
+  spendsRenderRadar(channelData.kpi, channelData.campaigns.length);
   spendsRenderTable();
 }
 
@@ -1364,23 +1709,29 @@ async function spendsLoad() {
   }
 }
 
-document.getElementById('spendsDateRangeBtn').addEventListener('click', () => {
-  spendsSelectionMode = spendsSelectionMode === 'range' ? 'single' : 'range';
-  spendsPendingRangeStart = null;
-  spendsRenderCalendar();
-});
 document.getElementById('spendsCalendarResetBtn').addEventListener('click', spendsResetDateRange);
-document.getElementById('spendsCalendarPrevBtn').addEventListener('click', () => {
-  spendsCalendarViewDate = new Date(Date.UTC(spendsCalendarViewDate.getUTCFullYear(), spendsCalendarViewDate.getUTCMonth() - 1, 1));
+document.getElementById('spendsCalendarPrevBtnLeft').addEventListener('click', () => {
+  spendsCalendarViewDateLeft = new Date(Date.UTC(spendsCalendarViewDateLeft.getUTCFullYear(), spendsCalendarViewDateLeft.getUTCMonth() - 1, 1));
   spendsRenderCalendar();
 });
-document.getElementById('spendsCalendarNextBtn').addEventListener('click', () => {
-  spendsCalendarViewDate = new Date(Date.UTC(spendsCalendarViewDate.getUTCFullYear(), spendsCalendarViewDate.getUTCMonth() + 1, 1));
+document.getElementById('spendsCalendarNextBtnLeft').addEventListener('click', () => {
+  spendsCalendarViewDateLeft = new Date(Date.UTC(spendsCalendarViewDateLeft.getUTCFullYear(), spendsCalendarViewDateLeft.getUTCMonth() + 1, 1));
   spendsRenderCalendar();
 });
-document.getElementById('spendsCalendarGrid').addEventListener('click', (e) => {
+document.getElementById('spendsCalendarPrevBtnRight').addEventListener('click', () => {
+  spendsCalendarViewDateRight = new Date(Date.UTC(spendsCalendarViewDateRight.getUTCFullYear(), spendsCalendarViewDateRight.getUTCMonth() - 1, 1));
+  spendsRenderCalendar();
+});
+document.getElementById('spendsCalendarNextBtnRight').addEventListener('click', () => {
+  spendsCalendarViewDateRight = new Date(Date.UTC(spendsCalendarViewDateRight.getUTCFullYear(), spendsCalendarViewDateRight.getUTCMonth() + 1, 1));
+  spendsRenderCalendar();
+});
+document.getElementById('spendsCalendarApplyBtn').addEventListener('click', spendsCommitDateRange);
+document.getElementById('spendsCalendarCancelBtn').addEventListener('click', spendsCancelDraftRange);
+document.getElementById('spendsCalendarTwoMonths').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-date]');
   if (!btn) return;
+  e.stopPropagation(); // see the matching comment on the Leads calendar's listener
   spendsHandleDayClick(btn.dataset.date);
 });
 
@@ -1401,27 +1752,63 @@ document.getElementById('spendsChannelTabs').addEventListener('click', (e) => {
   // paid channel. "All Regions" stays valid either way.
   if (!spendsIsMessaging() && spendsActiveRegion === 'MEA') spendsActiveRegion = 'India';
   spendsPopulateRegionSelect();
+  spendsClearCampaignSearch();
+  spendsClearSelection();
   spendsRender();
 });
 
 document.getElementById('spendsGroupToggle').addEventListener('click', spendsToggleGroup);
 
+// Debounced (180ms) -- filtering on every single keystroke felt too abrupt/
+// flickery, especially combined with the row fade-in animation restarting
+// each time. The clear (x) button still toggles instantly since that's a
+// cheap visibility check, not a re-render.
+let spendsSearchDebounceTimer = null;
+document.getElementById('spendsCampaignSearch').addEventListener('input', (e) => {
+  const value = e.target.value;
+  document.getElementById('spendsCampaignSearchClear').classList.toggle('hidden', !value);
+  clearTimeout(spendsSearchDebounceTimer);
+  spendsSearchDebounceTimer = setTimeout(() => {
+    spendsSearchQuery = value;
+    if (spendsSearchQuery && !spendsGroupExpanded) spendsGroupExpanded = true;
+    spendsRenderTable(true);
+  }, 180);
+});
+document.getElementById('spendsCampaignSearchClear').addEventListener('click', () => {
+  clearTimeout(spendsSearchDebounceTimer);
+  spendsSearchQuery = '';
+  const input = document.getElementById('spendsCampaignSearch');
+  input.value = '';
+  document.getElementById('spendsCampaignSearchClear').classList.add('hidden');
+  input.focus();
+  spendsRenderTable(true);
+});
+
 function spendsDisableCompare() {
-  spendsCompareEnabled = false;
+  spendsCompareMode = null;
   spendsPrevData = null;
+  spendsCustomCompareStart = null;
+  spendsCustomCompareEnd = null;
+  comparePendingRangeStart = null;
   document.getElementById('spendsCompareToggle').classList.remove('active');
+  document.getElementById('spendsCompareCustomBtn').classList.remove('active');
+  document.getElementById('spendsCompareCustomLabel').textContent = 'Compare with custom range';
   document.getElementById('spendsCompareClose').classList.add('hidden');
+  renderCompareCalendar();
   spendsRender();
 }
 
 document.getElementById('spendsCompareToggle').addEventListener('click', async (e) => {
-  if (spendsCompareEnabled) {
+  if (spendsCompareMode === 'auto') {
     spendsDisableCompare();
     return;
   }
-  spendsCompareEnabled = true;
+  spendsCompareMode = 'auto';
   document.getElementById('spendsCompareToggle').classList.add('active');
+  document.getElementById('spendsCompareCustomBtn').classList.remove('active');
+  document.getElementById('spendsCompareCustomLabel').textContent = 'Compare with custom range';
   document.getElementById('spendsCompareClose').classList.remove('hidden');
+  renderCompareCalendar();
   pulseScale(e.currentTarget);
   const status = document.getElementById('spendsStatus');
   status.textContent = 'Loading comparison...';
@@ -1435,14 +1822,237 @@ document.getElementById('spendsCompareClose').addEventListener('click', (e) => {
   spendsDisableCompare();
 });
 
+// ---- Custom comparison range -- same two-month single-view calendar and
+// mandatory two-click (start, then end) selection as the primary date
+// pickers, letting the user compare the selected primary range against ANY
+// hand-picked window, not just "the immediately preceding period". ----
+let comparePendingRangeStart = null;
+let compareDraftStartDate = null;
+let compareDraftEndDate = null;
+let compareCalendarViewDateLeft = monthStartUTC(spendsEndDate, -1);
+let compareCalendarViewDateRight = monthStartUTC(spendsEndDate, 0);
+
+function renderCompareCalendarHeader() {
+  const hasDraft = compareDraftStartDate && compareDraftEndDate;
+  const hasSelection = spendsCompareMode === 'custom' && spendsCustomCompareStart && spendsCustomCompareEnd;
+  const rangePill = document.getElementById('compareCalendarRangePill');
+  if (hasDraft) {
+    rangePill.textContent = compareDraftStartDate === compareDraftEndDate
+      ? DATE_LABEL_FMT.format(new Date(compareDraftEndDate + 'T00:00:00Z'))
+      : `${RANGE_DATE_FMT.format(new Date(compareDraftStartDate + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(compareDraftEndDate + 'T00:00:00Z'))}`;
+    rangePill.classList.remove('hidden');
+  } else if (comparePendingRangeStart) {
+    rangePill.textContent = `From ${RANGE_DATE_FMT.format(new Date(comparePendingRangeStart + 'T00:00:00Z'))} — pick end date`;
+    rangePill.classList.remove('hidden');
+  } else if (hasSelection) {
+    rangePill.textContent = spendsCustomCompareStart === spendsCustomCompareEnd
+      ? DATE_LABEL_FMT.format(new Date(spendsCustomCompareEnd + 'T00:00:00Z'))
+      : `${RANGE_DATE_FMT.format(new Date(spendsCustomCompareStart + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(spendsCustomCompareEnd + 'T00:00:00Z'))}`;
+    rangePill.classList.remove('hidden');
+  } else {
+    rangePill.classList.add('hidden');
+  }
+  document.getElementById('compareCalendarResetBtn').classList.toggle('hidden', !(comparePendingRangeStart || hasSelection));
+  document.getElementById('compareCalendarHelperText').classList.toggle('hidden', !!comparePendingRangeStart || !!hasDraft);
+  document.getElementById('compareCalendarApplyRow').classList.toggle('hidden', !hasDraft);
+}
+
+function compareUpdateQuickRangeActive() {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  document.querySelectorAll('#compareQuickRangeRow .quick-range-btn').forEach(btn => {
+    const expectedStart = btn.dataset.preset
+      ? (btn.dataset.preset === 'fy' ? fiscalYearStartDate() : quarterStartDate())
+      : addDaysToDateStr(todayStr, -(parseInt(btn.dataset.days, 10) - 1));
+    const isActive = spendsCompareMode === 'custom' && spendsCustomCompareEnd === todayStr && spendsCustomCompareStart === expectedStart;
+    btn.classList.toggle('active', isActive);
+  });
+}
+
+function renderCompareCalendarMonthGrid(viewDate, gridId) {
+  const year = viewDate.getUTCFullYear();
+  const month = viewDate.getUTCMonth();
+  const firstOfMonth = new Date(Date.UTC(year, month, 1));
+  const leadingBlanks = (firstOfMonth.getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const hasDraft = compareDraftStartDate && compareDraftEndDate;
+  const hasAppliedSelection = spendsCompareMode === 'custom' && spendsCustomCompareStart && spendsCustomCompareEnd;
+  const displayStart = hasDraft ? compareDraftStartDate : spendsCustomCompareStart;
+  const displayEnd = hasDraft ? compareDraftEndDate : spendsCustomCompareEnd;
+  const hasSelection = hasDraft || hasAppliedSelection;
+  const cells = [];
+  for (let i = 0; i < leadingBlanks; i++) cells.push('<span class="calendar-day calendar-day-blank"></span>');
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const isFuture = dateStr > todayStr;
+    const isToday = dateStr === todayStr;
+    const isPending = comparePendingRangeStart === dateStr;
+    const isEdge = hasSelection && !comparePendingRangeStart && (dateStr === displayStart || dateStr === displayEnd);
+    const isBetween = hasSelection && !comparePendingRangeStart && dateStr > displayStart && dateStr < displayEnd;
+    const classes = ['calendar-day'];
+    if (isFuture) classes.push('calendar-day-future');
+    else if (isPending) classes.push('calendar-day-pending');
+    else if (isEdge) classes.push('calendar-day-selected');
+    else if (isBetween) classes.push('calendar-day-in-range');
+    else if (isToday) classes.push('calendar-day-today');
+    const attrs = isFuture ? 'disabled' : `data-date="${dateStr}"`;
+    const dot = isToday && !isPending && !isEdge ? '<span class="calendar-day-dot"></span>' : '';
+    cells.push(`<button type="button" class="${classes.join(' ')}" ${attrs}>${day}${dot}</button>`);
+  }
+  document.getElementById(gridId).innerHTML = cells.join('');
+}
+
+function renderCompareCalendar() {
+  renderCompareCalendarHeader();
+  compareUpdateQuickRangeActive();
+  document.getElementById('compareCalendarMonthLabelLeft').textContent = CALENDAR_MONTH_FMT.format(compareCalendarViewDateLeft).toUpperCase();
+  document.getElementById('compareCalendarMonthLabelRight').textContent = CALENDAR_MONTH_FMT.format(compareCalendarViewDateRight).toUpperCase();
+  renderCompareCalendarMonthGrid(compareCalendarViewDateLeft, 'compareCalendarGridLeft');
+  renderCompareCalendarMonthGrid(compareCalendarViewDateRight, 'compareCalendarGridRight');
+}
+
+async function applyCustomCompareRange(start, end) {
+  spendsCustomCompareStart = start;
+  spendsCustomCompareEnd = end;
+  spendsCompareMode = 'custom';
+  compareCalendarViewDateLeft = monthStartUTC(end, -1);
+  compareCalendarViewDateRight = monthStartUTC(end, 0);
+  renderCompareCalendar();
+  document.getElementById('spendsCompareToggle').classList.remove('active');
+
+  const status = document.getElementById('spendsStatus');
+  status.textContent = 'Loading comparison...';
+  try {
+    const res = await fetch(`/api/clg-spends?startDate=${start}&endDate=${end}`);
+    const data = await res.json();
+    spendsPrevData = res.ok ? data : null;
+  } catch (err) {
+    spendsPrevData = null;
+  }
+  status.textContent = '';
+  spendsUpdateCompareToggle();
+  document.getElementById('spendsCompareClose').classList.remove('hidden');
+  spendsRender();
+  closeAllDatePopovers();
+}
+
+// Picking a start+end day only stages a draft, same as the primary pickers --
+// nothing is applied/fetched until Update (compareCommitRange) is clicked.
+function handleCompareDayClick(dateStr) {
+  if (!comparePendingRangeStart) {
+    comparePendingRangeStart = dateStr;
+    renderCompareCalendar();
+    return;
+  }
+  compareDraftStartDate = comparePendingRangeStart < dateStr ? comparePendingRangeStart : dateStr;
+  compareDraftEndDate = comparePendingRangeStart < dateStr ? dateStr : comparePendingRangeStart;
+  comparePendingRangeStart = null;
+  renderCompareCalendar();
+  pulseScale(document.querySelector('#compareCalendarTwoMonths .calendar-day-selected'));
+}
+
+function compareCommitRange() {
+  if (compareDraftStartDate && compareDraftEndDate) {
+    applyCustomCompareRange(compareDraftStartDate, compareDraftEndDate);
+  }
+  compareDraftStartDate = null;
+  compareDraftEndDate = null;
+}
+
+function compareCancelDraftRange() {
+  comparePendingRangeStart = null;
+  compareDraftStartDate = null;
+  compareDraftEndDate = null;
+  renderCompareCalendar();
+  closeAllDatePopovers();
+}
+
+// Quick-range presets/apply are one-click, unambiguous actions -- they still
+// commit and close immediately, same as the primary pickers' presets.
+function compareApplyQuickRange(days) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  comparePendingRangeStart = null;
+  compareDraftStartDate = null;
+  compareDraftEndDate = null;
+  applyCustomCompareRange(addDaysToDateStr(todayStr, -(days - 1)), todayStr);
+}
+
+function compareApplyDatePreset(preset) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  comparePendingRangeStart = null;
+  compareDraftStartDate = null;
+  compareDraftEndDate = null;
+  applyCustomCompareRange(preset === 'fy' ? fiscalYearStartDate() : quarterStartDate(), todayStr);
+}
+
+function compareResetRange() {
+  comparePendingRangeStart = null;
+  compareDraftStartDate = null;
+  compareDraftEndDate = null;
+  if (spendsCompareMode === 'custom') { spendsDisableCompare(); return; }
+  renderCompareCalendar();
+}
+
+document.getElementById('spendsCompareCustomBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const pop = document.getElementById('compareCustomPopover');
+  const wasHidden = pop.classList.contains('hidden');
+  closeAllDatePopovers();
+  if (wasHidden) {
+    // Reopening always discards any abandoned draft, same as the primary pickers.
+    comparePendingRangeStart = null;
+    compareDraftStartDate = null;
+    compareDraftEndDate = null;
+    if (!(spendsCompareMode === 'custom' && spendsCustomCompareEnd)) {
+      compareCalendarViewDateLeft = monthStartUTC(spendsEndDate, -1);
+      compareCalendarViewDateRight = monthStartUTC(spendsEndDate, 0);
+    }
+    renderCompareCalendar();
+    pop.classList.remove('hidden');
+  }
+});
+document.getElementById('compareCalendarApplyBtn').addEventListener('click', compareCommitRange);
+document.getElementById('compareCalendarCancelBtn').addEventListener('click', compareCancelDraftRange);
+document.getElementById('compareCalendarResetBtn').addEventListener('click', compareResetRange);
+document.getElementById('compareCalendarPrevBtnLeft').addEventListener('click', () => {
+  compareCalendarViewDateLeft = new Date(Date.UTC(compareCalendarViewDateLeft.getUTCFullYear(), compareCalendarViewDateLeft.getUTCMonth() - 1, 1));
+  renderCompareCalendar();
+});
+document.getElementById('compareCalendarNextBtnLeft').addEventListener('click', () => {
+  compareCalendarViewDateLeft = new Date(Date.UTC(compareCalendarViewDateLeft.getUTCFullYear(), compareCalendarViewDateLeft.getUTCMonth() + 1, 1));
+  renderCompareCalendar();
+});
+document.getElementById('compareCalendarPrevBtnRight').addEventListener('click', () => {
+  compareCalendarViewDateRight = new Date(Date.UTC(compareCalendarViewDateRight.getUTCFullYear(), compareCalendarViewDateRight.getUTCMonth() - 1, 1));
+  renderCompareCalendar();
+});
+document.getElementById('compareCalendarNextBtnRight').addEventListener('click', () => {
+  compareCalendarViewDateRight = new Date(Date.UTC(compareCalendarViewDateRight.getUTCFullYear(), compareCalendarViewDateRight.getUTCMonth() + 1, 1));
+  renderCompareCalendar();
+});
+document.getElementById('compareCalendarTwoMonths').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-date]');
+  if (!btn) return;
+  e.stopPropagation(); // see the matching comment on the Leads calendar's listener
+  handleCompareDayClick(btn.dataset.date);
+});
+document.getElementById('compareQuickRangeRow').addEventListener('click', (e) => {
+  const btn = e.target.closest('.quick-range-btn');
+  if (!btn) return;
+  pulseScale(btn);
+  if (btn.dataset.preset) compareApplyDatePreset(btn.dataset.preset);
+  else compareApplyQuickRange(parseInt(btn.dataset.days, 10));
+});
+
 // ---- Quick-range presets (7/14/30/60/90 days ending today), matching the
 // canned windows LinkedIn/Meta Ads' own dashboards offer, as an alternative
 // to manually picking two dates on the calendar. ----
 function spendsUpdateQuickRangeActive() {
   const todayStr = new Date().toISOString().slice(0, 10);
   document.querySelectorAll('#spendsQuickRangeRow .quick-range-btn').forEach(btn => {
-    const days = parseInt(btn.dataset.days, 10);
-    const expectedStart = addDaysToDateStr(todayStr, -(days - 1));
+    const expectedStart = btn.dataset.preset
+      ? (btn.dataset.preset === 'fy' ? fiscalYearStartDate() : quarterStartDate())
+      : addDaysToDateStr(todayStr, -(parseInt(btn.dataset.days, 10) - 1));
     const isActive = spendsHasExplicitSelection && spendsEndDate === todayStr && spendsStartDate === expectedStart;
     btn.classList.toggle('active', isActive);
   });
@@ -1450,12 +2060,29 @@ function spendsUpdateQuickRangeActive() {
 
 function spendsApplyQuickRange(days) {
   const todayStr = new Date().toISOString().slice(0, 10);
-  spendsSelectionMode = 'single';
   spendsPendingRangeStart = null;
+  spendsDraftStartDate = null;
+  spendsDraftEndDate = null;
   spendsEndDate = todayStr;
   spendsStartDate = addDaysToDateStr(todayStr, -(days - 1));
   spendsHasExplicitSelection = true;
-  spendsCalendarViewDate = new Date(spendsEndDate + 'T00:00:00Z');
+  spendsCalendarViewDateLeft = monthStartUTC(spendsEndDate, -1);
+  spendsCalendarViewDateRight = monthStartUTC(spendsEndDate, 0);
+  spendsRenderCalendar();
+  spendsLoad();
+  closeAllDatePopovers();
+}
+
+function spendsApplyDatePreset(preset) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  spendsPendingRangeStart = null;
+  spendsDraftStartDate = null;
+  spendsDraftEndDate = null;
+  spendsEndDate = todayStr;
+  spendsStartDate = preset === 'fy' ? fiscalYearStartDate() : quarterStartDate();
+  spendsHasExplicitSelection = true;
+  spendsCalendarViewDateLeft = monthStartUTC(spendsEndDate, -1);
+  spendsCalendarViewDateRight = monthStartUTC(spendsEndDate, 0);
   spendsRenderCalendar();
   spendsLoad();
   closeAllDatePopovers();
@@ -1465,7 +2092,8 @@ document.getElementById('spendsQuickRangeRow').addEventListener('click', (e) => 
   const btn = e.target.closest('.quick-range-btn');
   if (!btn) return;
   pulseScale(btn);
-  spendsApplyQuickRange(parseInt(btn.dataset.days, 10));
+  if (btn.dataset.preset) spendsApplyDatePreset(btn.dataset.preset);
+  else spendsApplyQuickRange(parseInt(btn.dataset.days, 10));
 });
 
 populateRegionSelectLeads();

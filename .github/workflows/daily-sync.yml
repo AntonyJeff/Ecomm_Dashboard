@@ -23,6 +23,7 @@ jobs:
           CLG_SHEET_ID: ${{ secrets.CLG_SHEET_ID }}
           CLG_LEADS_SHEET_NAME: Leads
           CLG_OPPORTUNITY_SHEET_NAME: Opportunity
+          CLG_ACCOUNTS_SHEET_NAME: Global Ecomm TAL
           GOOGLE_CLIENT_EMAIL: ${{ secrets.GOOGLE_CLIENT_EMAIL }}
           GOOGLE_PRIVATE_KEY: ${{ secrets.GOOGLE_PRIVATE_KEY }}
           SF_CONSUMER_KEY: ${{ secrets.SF_CONSUMER_KEY }}

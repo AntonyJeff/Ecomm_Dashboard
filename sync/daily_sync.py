@@ -27,7 +27,17 @@ except ImportError:
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 # -- Date range: fixed start (campaign launch) -> yesterday dynamic ------------
-yesterday  = datetime.now(timezone.utc) - timedelta(days=1)
+# "Yesterday" must be computed in IST, not raw UTC -- the GitHub Actions cron
+# fires at 21:30 UTC, which IS 3:00 AM IST the next day, but is still the
+# PREVIOUS calendar day in UTC. Subtracting a day from bare UTC "now" at that
+# moment landed on the day before the intended one (confirmed live: a run
+# that executed at 3:00 AM IST on Sep 18 computed END_DATE = Sep 16 instead of
+# Sep 17, silently dropping an entire day of leads from every sync every
+# single day). Converting to IST first before taking "yesterday" fixes this
+# regardless of the exact minute the job actually runs.
+IST = timezone(timedelta(hours=5, minutes=30))
+now_ist    = datetime.now(timezone.utc).astimezone(IST)
+yesterday  = now_ist - timedelta(days=1)
 START_DATE = '2026-01-01T00:00:00Z'
 END_DATE   = yesterday.strftime('%Y-%m-%dT23:59:59Z')
 DATE_LABEL = yesterday.strftime('%Y-%m-%d')
@@ -343,6 +353,26 @@ SF_LOGIN_URL      = "https://netcore.my.salesforce.com"
 SHEET_ID          = os.environ['CLG_SHEET_ID']
 LEADS_SHEET_NAME  = os.environ.get('CLG_LEADS_SHEET_NAME', 'Leads')
 OPP_SHEET_NAME    = os.environ.get('CLG_OPPORTUNITY_SHEET_NAME', 'Opportunity')
+ACCOUNTS_SHEET_NAME = os.environ.get('CLG_ACCOUNTS_SHEET_NAME', 'Global Ecomm TAL')
+
+# -- Accounts filter (TAL/Non-TAL classification input) -- mirrors the report
+# filter given directly by the user: Show Me = All accounts, Created Date =
+# All Time (deliberately unbounded -- a pre-existing TAL account may predate
+# our Ecomm motion entirely, so filtering by START_DATE here would wrongly
+# hide it and misclassify its leads as Non-TAL), Marketing Region equals
+# India/MEA/SEA/EU/LATAM, Website Category contains Ecomm/retail/d2c/e-comm/
+# other/dimi -- widened from the original Ecomm/retail/d2c/e-comm-only filter
+# per the user's updated filter definition (added after Ruptub Solutions Pvt.
+# Ltd (Treebo Hotels), Website_Category__c = 'DOM_DIMI', was found missing
+# from this sheet entirely under the old filter).
+# Verified live against Salesforce: both fields exist on Account exactly as
+# named (Marketing_Region__c picklist, Website_Category__c string).
+ACCOUNT_REGION_VALUES = ['India', 'MEA', 'SEA', 'EU', 'LATAM']
+ACCOUNT_WEBSITE_CATEGORY_VALUES = ['Ecomm', 'retail', 'd2c', 'e-comm', 'other', 'dimi']
+ACCOUNT_WHERE = (
+    f"Marketing_Region__c IN {soql_in(ACCOUNT_REGION_VALUES)} "
+    f"AND ({soql_contains_terms('Website_Category__c', ACCOUNT_WEBSITE_CATEGORY_VALUES)})"
+)
 
 # All credentials come from GitHub Secrets / .env.local -- never hardcoded
 SF_CONSUMER_KEY    = os.environ['SF_CONSUMER_KEY']
@@ -693,6 +723,34 @@ def sync_opportunities(token, instance_url, gc):
     clear_and_write_sheet(gc, SHEET_ID, OPP_SHEET_NAME, pd.DataFrame(rows))
 
 
+# -- Accounts sync (TAL/Non-TAL classification input) ----------------------------
+# Unlike every other sync here, this pulls the full unfiltered-by-date Account
+# universe matching the region/vertical filter -- see ACCOUNT_WHERE above for
+# why CreatedDate must stay unbounded.
+def sync_accounts(token, instance_url, gc):
+    print(f"\n[Accounts] Fetching all-time matching accounts...")
+    query = f"""
+    SELECT Id, Name, CreatedDate, Marketing_Region__c, Website_Category__c
+    FROM Account
+    WHERE {ACCOUNT_WHERE}
+    """.strip()
+
+    records = soql_fetch(token, instance_url, query)
+    print(f"  Found {len(records)} accounts")
+    if not records:
+        return
+
+    rows = [{
+        'Id':                     r.get('Id', ''),
+        'Name':                   r.get('Name', ''),
+        'CreatedDate':            fmt_date(r.get('CreatedDate', '')),
+        'Marketing_Region__c':    r.get('Marketing_Region__c', ''),
+        'Website_Category__c':    r.get('Website_Category__c', ''),
+    } for r in records]
+
+    clear_and_write_sheet(gc, SHEET_ID, ACCOUNTS_SHEET_NAME, pd.DataFrame(rows))
+
+
 # -- Entry point -----------------------------------------------------------------
 if __name__ == "__main__":
     print("=" * 50)
@@ -713,5 +771,6 @@ if __name__ == "__main__":
     for region in SQL_OPPORTUNITY_FILTERS:
         sync_sql_for_region(token, instance_url, gc, region)
     sync_opportunities(token, instance_url, gc)
+    sync_accounts(token, instance_url, gc)
 
     print("\n[Done] Sync complete.")

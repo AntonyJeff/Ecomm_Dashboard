@@ -231,30 +231,6 @@ body {
   align-items: center;
   gap: 8px;
 }
-.date-range-value {
-  font-size: 12px;
-  color: #6c5ce7;
-  animation: fadeIn 0.3s ease-out both;
-}
-.date-range-btn {
-  font: inherit;
-  font-size: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid #1a1f35;
-  border-radius: 8px;
-  background: #141729;
-  color: #4a5568;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
-}
-.date-range-btn.active {
-  background: #2d2252;
-  border-color: #6c5ce7;
-  color: #a29bfe;
-}
 .calendar-reset-btn {
   font: inherit;
   font-size: 12px;
@@ -268,6 +244,38 @@ body {
   animation: fadeIn 0.25s ease-out both;
 }
 .calendar-reset-btn:hover { opacity: 0.85; }
+
+/* Update/Cancel row -- shown only once a start+end day pair has been picked
+   but not yet applied (see draftStartDate/draftEndDate). Nothing about the
+   selected range takes effect -- no reload, popover stays open -- until
+   Update is clicked; Cancel discards the draft and closes without applying. */
+.calendar-apply-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+  animation: fadeIn 0.2s ease-out both;
+}
+.calendar-cancel-btn, .calendar-update-btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.calendar-cancel-btn {
+  border: 1px solid #1a1f35;
+  background: transparent;
+  color: #4a5568;
+}
+.calendar-cancel-btn:hover { color: #cbd5e1; border-color: #334155; }
+.calendar-update-btn {
+  border: 1px solid #6c5ce7;
+  background: #6c5ce7;
+  color: #fff;
+}
+.calendar-update-btn:hover { opacity: 0.9; }
 
 .calendar-helper-text {
   margin: 0;
@@ -291,6 +299,29 @@ body {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   row-gap: 2px;
+}
+
+/* Two-month single-view range picker (LinkedIn-style) -- both months visible
+   at once so a start/end click pair never requires closing and reopening or
+   re-navigating the popover. Each month pages independently via its own
+   prev/next. */
+.date-popover.calendar-card-wide { width: 640px; }
+.calendar-two-months {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.calendar-month-col {
+  flex: 1 1 260px;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.calendar-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .calendar-day {
   font: inherit;
@@ -914,7 +945,6 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
   padding: 6px 14px;
   border-radius: 999px;
   cursor: pointer;
-  margin-left: auto;
   border: 1px solid var(--border);
   background: none;
   color: var(--text-2);
@@ -942,6 +972,7 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
   padding: 0;
 }
 .compare-toggle-close:hover { color: var(--text); border-color: var(--text-2); }
+
 
 .quick-range-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 4px; }
 .quick-range-btn {
@@ -1062,6 +1093,85 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 .radar-readout-stats span { color: #334155; }
 .radar-readout-stats b { color: #e2e8f0; font-weight: 700; }
 .radar-stat-ndl { color: #00d68f !important; }
+
+/* TAL vs Non-TAL widget -- replaces the Leads tab's old radar visualization,
+   same card family/footer styling (radar-header/radar-readout-status reused
+   as-is), but the body is two big clickable stat cards instead of the SVG
+   sweep. Clicking a card reuses the existing pivot-cell-clickable click
+   handler/modal (see #app click listener in app.js) via data-records/
+   data-status-label set at render time. */
+.tal-widget {
+  flex: 1 1 280px;
+  border: 1px solid #1a1f35;
+  border-radius: 16px;
+  padding: 20px;
+  background: #0f1221;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.tal-widget-body { display: flex; gap: 14px; flex: 1; }
+.tal-stat-card {
+  flex: 1;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  text-decoration: none;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.tal-stat-card:hover { transform: translateY(-2px); }
+.tal-stat-tal { background: rgba(0, 214, 143, 0.08); border: 1px solid rgba(0, 214, 143, 0.25); }
+.tal-stat-tal:hover { background: rgba(0, 214, 143, 0.14) !important; color: inherit; }
+.tal-stat-nontal { background: rgba(255, 107, 107, 0.08); border: 1px solid rgba(255, 107, 107, 0.25); }
+.tal-stat-nontal:hover { background: rgba(255, 107, 107, 0.14) !important; color: inherit; }
+.tal-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #4a5568;
+}
+.tal-stat-value {
+  font-family: "SF Mono", "Consolas", "Menlo", monospace;
+  font-size: 32px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+.tal-stat-tal .tal-stat-value { color: #00d68f; }
+.tal-stat-nontal .tal-stat-value { color: #ff6b6b; }
+.tal-stat-pct { font-size: 12px; color: #334155; }
+.tal-widget-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 107, 107, 0.25);
+  overflow: hidden;
+}
+.tal-widget-bar-tal { height: 100%; background: #00d68f; border-radius: 3px 0 0 3px; transition: width 0.4s ease; }
+
+/* IQL/MQL/SQL/MRR TAL-vs-Non-TAL mini-table -- same underlying company
+   verdict as the two Lead cards above, just summed from each stage's own
+   sheet (see renderTalFunnelTable). */
+.tal-funnel-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.tal-funnel-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  padding: 4px 2px;
+}
+.tal-funnel-head { color: #4a5568; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+.tal-funnel-label { color: #cbd5e1; font-weight: 600; }
+.tal-funnel-val { text-align: left; cursor: pointer; color: #a29bfe; }
+.tal-funnel-val:hover { text-decoration: underline; }
+
+.tal-widget-status { display: flex; flex-direction: column; gap: 4px; }
 .radar-stat-sum { color: #a29bfe !important; }
 .radar-readout-status { color: #1e3a5f; font-size: 10px; word-break: break-word; }
 .radar-dot-ok { color: #00d68f; }
@@ -1089,24 +1199,72 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 }
 .spends-back-btn:hover { color: var(--text); border-color: var(--text-2); }
 
+.spends-group-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 12px;
+  flex-wrap: wrap;
+}
 .spends-group-toggle {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
   color: #94a3b8;
   background: none;
   border: none;
-  padding: 0 0 12px;
+  padding: 0;
   cursor: pointer;
   text-align: left;
 }
 .spends-group-toggle:hover { color: #e2e8f0; }
-.spends-group-arrow { color: #6c5ce7; font-size: 11px; width: 10px; }
-.spends-group-meta { margin-left: auto; color: #4a5568; font-weight: 500; }
+.spends-group-arrow { color: #6c5ce7; font-size: 11px; width: 10px; flex: none; }
+.spends-group-meta { margin-left: auto; color: #4a5568; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.spends-search-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  width: 220px;
+  max-width: 100%;
+}
+.spends-search-icon {
+  position: absolute;
+  left: 10px;
+  font-size: 12px;
+  color: #4a5568;
+  pointer-events: none;
+}
+.spends-search-input {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 28px 7px 28px;
+  border-radius: 8px;
+  border: 1px solid #232842;
+  background: #10142a;
+  color: #e2e8f0;
+}
+.spends-search-input::placeholder { color: #4a5568; }
+.spends-search-input:focus { outline: none; border-color: #6c5ce7; }
+.spends-search-clear {
+  position: absolute;
+  right: 6px;
+  border: none;
+  background: none;
+  color: #4a5568;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  line-height: 1;
+}
+.spends-search-clear:hover { color: #e2e8f0; }
 
 /* Higher specificity than the generic ".pivot-table th/td" rule (which sets
    white-space:normal + overflow-wrap:break-word) -- without qualifying by
@@ -1125,6 +1283,41 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
   overflow-wrap: normal;
 }
 .spends-table th:not(.pin), .spends-table td:not(.pin) { text-align: right; }
+.spends-td-nolead { color: #334155; }
+
+.spends-th-check, .spends-td-check {
+  width: 32px;
+  max-width: 32px;
+  text-align: center !important;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.spends-campaign-checkbox, #spendsSelectAllCheckbox {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--accent, #6366f1);
+}
+
+.spends-creative-arrow {
+  display: inline-block;
+  width: 12px;
+  color: #6c5ce7;
+  font-size: 10px;
+}
+.spends-creative-arrow-empty { visibility: hidden; }
+tr.spends-campaign-row.has-creatives { cursor: pointer; }
+tr.spends-campaign-row.has-creatives:hover td { background: rgba(108, 92, 231, 0.06); }
+tr.spends-creative-row td { background: rgba(148, 163, 184, 0.04); }
+tr.spends-creative-row .spends-td-creative {
+  padding-left: 28px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 400;
+}
+:root[data-theme="light"] tr.spends-campaign-row.has-creatives:hover td { background: rgba(108, 92, 231, 0.08); }
+:root[data-theme="light"] tr.spends-creative-row td { background: rgba(100, 116, 139, 0.05); }
+:root[data-theme="light"] tr.spends-creative-row .spends-td-creative { color: var(--text-muted, #64748b); }
 
 /* ============================================================
    LIGHT THEME -- multi-color fintech-app look (white cards on a soft
@@ -1142,9 +1335,8 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 :root[data-theme="light"] .calendar-nav-btn { border-color: var(--border); color: var(--text-2); }
 :root[data-theme="light"] .calendar-nav-btn:hover { color: var(--accent); border-color: var(--accent); }
 :root[data-theme="light"] .calendar-range-pill { background: rgba(108, 92, 231, 0.12); color: var(--accent); }
-:root[data-theme="light"] .date-range-value { color: var(--accent); }
-:root[data-theme="light"] .date-range-btn { border-color: var(--border); background: #f6f4fd; color: var(--text-2); }
-:root[data-theme="light"] .date-range-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+:root[data-theme="light"] .calendar-cancel-btn { border-color: var(--border); color: var(--text-2); }
+:root[data-theme="light"] .calendar-cancel-btn:hover { color: var(--text); border-color: var(--text-2); }
 :root[data-theme="light"] .calendar-reset-btn { border-color: #f3b8b8; background: #fff2f2; color: #d63031; }
 :root[data-theme="light"] .calendar-helper-text { color: var(--text-2); }
 :root[data-theme="light"] .calendar-weekdays span { color: var(--text-2); }
@@ -1256,7 +1448,20 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 :root[data-theme="light"] .radar-stat-sum { color: var(--accent-2) !important; }
 :root[data-theme="light"] .radar-readout-status { color: var(--text-2); }
 
+:root[data-theme="light"] .tal-widget { border-color: var(--border); background: var(--surface); box-shadow: var(--card-shadow); }
+:root[data-theme="light"] .tal-stat-label { color: var(--text-2); }
+:root[data-theme="light"] .tal-stat-pct { color: var(--text-2); }
+:root[data-theme="light"] .tal-widget-status { color: var(--text-2); }
+:root[data-theme="light"] .tal-funnel-head { color: var(--text-2); }
+:root[data-theme="light"] .tal-funnel-label { color: var(--text); }
+:root[data-theme="light"] .tal-funnel-val { color: var(--accent); }
+
 :root[data-theme="light"] .spends-group-toggle { color: var(--text-2); }
 :root[data-theme="light"] .spends-group-toggle:hover { color: var(--text); }
 :root[data-theme="light"] .spends-group-arrow { color: var(--accent); }
 :root[data-theme="light"] .spends-group-meta { color: var(--text-2); }
+:root[data-theme="light"] .spends-search-input { background: var(--surface); border-color: var(--border); color: var(--text); }
+:root[data-theme="light"] .spends-search-input::placeholder { color: var(--text-2); }
+:root[data-theme="light"] .spends-search-icon { color: var(--text-2); }
+:root[data-theme="light"] .spends-search-clear { color: var(--text-2); }
+:root[data-theme="light"] .spends-search-clear:hover { color: var(--text); }

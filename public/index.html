@@ -19,19 +19,12 @@
         <button type="button" class="date-range-trigger" id="dateRangeTriggerLeads">
           <span>&#128197;</span> <span id="dateRangeTriggerLabelLeads">-</span>
         </button>
-        <div class="calendar-card date-popover hidden" id="datePopoverLeads">
+        <div class="calendar-card calendar-card-wide date-popover hidden" id="datePopoverLeads">
           <div class="calendar-card-header">
             <div class="calendar-card-heading">
-              <button type="button" class="calendar-nav-btn" id="calendarPrevBtn" aria-label="Previous month">&#8249;</button>
-              <span class="calendar-month-label" id="calendarMonthLabel"></span>
-              <button type="button" class="calendar-nav-btn" id="calendarNextBtn" aria-label="Next month">&#8250;</button>
               <span class="calendar-range-pill hidden" id="calendarRangePill"></span>
             </div>
             <div class="calendar-card-actions">
-              <span class="date-range-value hidden" id="dateRangeValue"></span>
-              <button type="button" class="date-range-btn" id="dateRangeBtn">
-                <span>&#8660;</span> Date Range
-              </button>
               <button type="button" class="calendar-reset-btn hidden" id="calendarResetBtn">
                 &#10005; Reset
               </button>
@@ -41,14 +34,38 @@
             <button type="button" class="quick-range-btn" data-days="7">7D</button>
             <button type="button" class="quick-range-btn" data-days="14">14D</button>
             <button type="button" class="quick-range-btn" data-days="30">30D</button>
-            <button type="button" class="quick-range-btn" data-days="60">60D</button>
-            <button type="button" class="quick-range-btn" data-days="90">90D</button>
+            <button type="button" class="quick-range-btn" data-preset="qtd">QTD</button>
+            <button type="button" class="quick-range-btn" data-preset="fy">Current FY</button>
           </div>
           <p class="calendar-helper-text hidden" id="calendarHelperText">Click a start date, then click an end date</p>
-          <div class="calendar-weekdays">
-            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+          <div class="calendar-two-months" id="calendarTwoMonths">
+            <div class="calendar-month-col">
+              <div class="calendar-month-nav">
+                <button type="button" class="calendar-nav-btn" id="calendarPrevBtnLeft" aria-label="Previous month">&#8249;</button>
+                <span class="calendar-month-label" id="calendarMonthLabelLeft"></span>
+                <button type="button" class="calendar-nav-btn" id="calendarNextBtnLeft" aria-label="Next month">&#8250;</button>
+              </div>
+              <div class="calendar-weekdays">
+                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+              </div>
+              <div class="calendar-grid" id="calendarGridLeft"></div>
+            </div>
+            <div class="calendar-month-col">
+              <div class="calendar-month-nav">
+                <button type="button" class="calendar-nav-btn" id="calendarPrevBtnRight" aria-label="Previous month">&#8249;</button>
+                <span class="calendar-month-label" id="calendarMonthLabelRight"></span>
+                <button type="button" class="calendar-nav-btn" id="calendarNextBtnRight" aria-label="Next month">&#8250;</button>
+              </div>
+              <div class="calendar-weekdays">
+                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+              </div>
+              <div class="calendar-grid" id="calendarGridRight"></div>
+            </div>
           </div>
-          <div class="calendar-grid" id="calendarGrid"></div>
+          <div class="calendar-apply-row hidden" id="calendarApplyRow">
+            <button type="button" class="calendar-cancel-btn" id="calendarCancelBtn">Cancel</button>
+            <button type="button" class="calendar-update-btn" id="calendarApplyBtn">Update</button>
+          </div>
           <span id="status" class="muted status-line"></span>
         </div>
       </div>
@@ -60,19 +77,12 @@
         <button type="button" class="date-range-trigger" id="dateRangeTriggerSpends">
           <span>&#128197;</span> <span id="dateRangeTriggerLabelSpends">-</span>
         </button>
-        <div class="calendar-card date-popover hidden" id="datePopoverSpends">
+        <div class="calendar-card calendar-card-wide date-popover hidden" id="datePopoverSpends">
           <div class="calendar-card-header">
             <div class="calendar-card-heading">
-              <button type="button" class="calendar-nav-btn" id="spendsCalendarPrevBtn" aria-label="Previous month">&#8249;</button>
-              <span class="calendar-month-label" id="spendsCalendarMonthLabel"></span>
-              <button type="button" class="calendar-nav-btn" id="spendsCalendarNextBtn" aria-label="Next month">&#8250;</button>
               <span class="calendar-range-pill hidden" id="spendsCalendarRangePill"></span>
             </div>
             <div class="calendar-card-actions">
-              <span class="date-range-value hidden" id="spendsDateRangeValue"></span>
-              <button type="button" class="date-range-btn" id="spendsDateRangeBtn">
-                <span>&#8660;</span> Date Range
-              </button>
               <button type="button" class="calendar-reset-btn hidden" id="spendsCalendarResetBtn">
                 &#10005; Reset
               </button>
@@ -82,17 +92,97 @@
             <button type="button" class="quick-range-btn" data-days="7">7D</button>
             <button type="button" class="quick-range-btn" data-days="14">14D</button>
             <button type="button" class="quick-range-btn" data-days="30">30D</button>
-            <button type="button" class="quick-range-btn" data-days="60">60D</button>
-            <button type="button" class="quick-range-btn" data-days="90">90D</button>
+            <button type="button" class="quick-range-btn" data-preset="qtd">QTD</button>
+            <button type="button" class="quick-range-btn" data-preset="fy">Current FY</button>
           </div>
           <p class="calendar-helper-text hidden" id="spendsCalendarHelperText">Click a start date, then click an end date</p>
-          <div class="calendar-weekdays">
-            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+          <div class="calendar-two-months" id="spendsCalendarTwoMonths">
+            <div class="calendar-month-col">
+              <div class="calendar-month-nav">
+                <button type="button" class="calendar-nav-btn" id="spendsCalendarPrevBtnLeft" aria-label="Previous month">&#8249;</button>
+                <span class="calendar-month-label" id="spendsCalendarMonthLabelLeft"></span>
+                <button type="button" class="calendar-nav-btn" id="spendsCalendarNextBtnLeft" aria-label="Next month">&#8250;</button>
+              </div>
+              <div class="calendar-weekdays">
+                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+              </div>
+              <div class="calendar-grid" id="spendsCalendarGridLeft"></div>
+            </div>
+            <div class="calendar-month-col">
+              <div class="calendar-month-nav">
+                <button type="button" class="calendar-nav-btn" id="spendsCalendarPrevBtnRight" aria-label="Previous month">&#8249;</button>
+                <span class="calendar-month-label" id="spendsCalendarMonthLabelRight"></span>
+                <button type="button" class="calendar-nav-btn" id="spendsCalendarNextBtnRight" aria-label="Next month">&#8250;</button>
+              </div>
+              <div class="calendar-weekdays">
+                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+              </div>
+              <div class="calendar-grid" id="spendsCalendarGridRight"></div>
+            </div>
           </div>
-          <div class="calendar-grid" id="spendsCalendarGrid"></div>
+          <div class="calendar-apply-row hidden" id="spendsCalendarApplyRow">
+            <button type="button" class="calendar-cancel-btn" id="spendsCalendarCancelBtn">Cancel</button>
+            <button type="button" class="calendar-update-btn" id="spendsCalendarApplyBtn">Update</button>
+          </div>
           <span id="spendsStatus" class="muted status-line"></span>
         </div>
       </div>
+
+      <button type="button" class="compare-toggle hidden" id="spendsCompareToggle"></button>
+      <div class="date-range-control compare-custom-control">
+        <button type="button" class="date-range-trigger compare-toggle" id="spendsCompareCustomBtn">
+          <span>&#8646;</span> <span id="spendsCompareCustomLabel">Compare with custom range</span>
+        </button>
+        <div class="calendar-card calendar-card-wide date-popover hidden" id="compareCustomPopover">
+          <div class="calendar-card-header">
+            <div class="calendar-card-heading">
+              <span class="calendar-range-pill hidden" id="compareCalendarRangePill"></span>
+            </div>
+            <div class="calendar-card-actions">
+              <button type="button" class="calendar-reset-btn hidden" id="compareCalendarResetBtn">
+                &#10005; Reset
+              </button>
+            </div>
+          </div>
+          <div class="quick-range-row" id="compareQuickRangeRow">
+            <button type="button" class="quick-range-btn" data-days="7">7D</button>
+            <button type="button" class="quick-range-btn" data-days="14">14D</button>
+            <button type="button" class="quick-range-btn" data-days="30">30D</button>
+            <button type="button" class="quick-range-btn" data-preset="qtd">QTD</button>
+            <button type="button" class="quick-range-btn" data-preset="fy">Current FY</button>
+          </div>
+          <p class="calendar-helper-text hidden" id="compareCalendarHelperText">Click a start date, then click an end date</p>
+          <div class="calendar-two-months" id="compareCalendarTwoMonths">
+            <div class="calendar-month-col">
+              <div class="calendar-month-nav">
+                <button type="button" class="calendar-nav-btn" id="compareCalendarPrevBtnLeft" aria-label="Previous month">&#8249;</button>
+                <span class="calendar-month-label" id="compareCalendarMonthLabelLeft"></span>
+                <button type="button" class="calendar-nav-btn" id="compareCalendarNextBtnLeft" aria-label="Next month">&#8250;</button>
+              </div>
+              <div class="calendar-weekdays">
+                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+              </div>
+              <div class="calendar-grid" id="compareCalendarGridLeft"></div>
+            </div>
+            <div class="calendar-month-col">
+              <div class="calendar-month-nav">
+                <button type="button" class="calendar-nav-btn" id="compareCalendarPrevBtnRight" aria-label="Previous month">&#8249;</button>
+                <span class="calendar-month-label" id="compareCalendarMonthLabelRight"></span>
+                <button type="button" class="calendar-nav-btn" id="compareCalendarNextBtnRight" aria-label="Next month">&#8250;</button>
+              </div>
+              <div class="calendar-weekdays">
+                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+              </div>
+              <div class="calendar-grid" id="compareCalendarGridRight"></div>
+            </div>
+          </div>
+          <div class="calendar-apply-row hidden" id="compareCalendarApplyRow">
+            <button type="button" class="calendar-cancel-btn" id="compareCalendarCancelBtn">Cancel</button>
+            <button type="button" class="calendar-update-btn" id="compareCalendarApplyBtn">Update</button>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="compare-toggle-close hidden" id="spendsCompareClose" aria-label="Clear comparison" title="Clear comparison">&times;</button>
     </div>
 
     <div class="topbar-actions">
@@ -156,58 +246,59 @@
       </div>
     </div>
 
-    <div class="radar-widget">
+    <div class="tal-widget">
       <div class="radar-header">
-        <span class="radar-header-title">Live Lead Radar</span>
+        <span class="radar-header-title">TAL vs Non-TAL</span>
         <span class="radar-live-text">&#9679; LIVE</span>
       </div>
-      <div class="radar-body">
-        <div class="radar-scope">
-          <svg class="radar-svg radar-svg-base" viewBox="0 0 200 200">
-            <defs>
-              <radialGradient id="radarBg" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stop-color="#060d1a" />
-                <stop offset="100%" stop-color="#020508" />
-              </radialGradient>
-            </defs>
-            <circle cx="100" cy="100" r="82" fill="url(#radarBg)" />
-            <circle class="radar-ring" cx="100" cy="100" r="22" />
-            <circle class="radar-ring" cx="100" cy="100" r="42" />
-            <circle class="radar-ring" cx="100" cy="100" r="62" />
-            <circle class="radar-ring" cx="100" cy="100" r="82" />
-            <line class="radar-axis" x1="18" y1="100" x2="182" y2="100" />
-            <line class="radar-axis" x1="100" y1="18" x2="100" y2="182" />
-            <line class="radar-axis radar-axis-diag" x1="42" y1="42" x2="158" y2="158" />
-            <line class="radar-axis radar-axis-diag" x1="158" y1="42" x2="42" y2="158" />
-            <circle class="radar-outer-border" cx="100" cy="100" r="82" />
-          </svg>
-          <div class="radar-sweep-glow"></div>
-          <svg class="radar-svg radar-svg-sweep" viewBox="0 0 200 200">
-            <g class="radar-sweep-wrap">
-              <line class="radar-sweep-glow-line" x1="100" y1="100" x2="100" y2="18" />
-              <line class="radar-sweep-line" x1="100" y1="100" x2="100" y2="18" />
-            </g>
-            <g id="radarBlips"></g>
-            <circle class="radar-center-ring" cx="100" cy="100" r="7" />
-            <circle class="radar-center-dot" cx="100" cy="100" r="3" />
-          </svg>
+      <div class="tal-widget-body">
+        <div class="tal-stat-card tal-stat-tal pivot-cell-clickable" id="talCountCard" title="Click to see TAL leads">
+          <div class="tal-stat-label">TAL Leads</div>
+          <div class="tal-stat-value" id="talCount">-</div>
+          <div class="tal-stat-pct" id="talPct">-</div>
         </div>
-        <div class="radar-readout">
-          <div class="radar-readout-sys">NETCORE INTELLIGENCE SYS v2.1</div>
-          <div class="radar-readout-scan"><span id="radarMessage">&#9654; SCANNING SECTOR...</span><span class="radar-cursor">_</span></div>
-          <div class="radar-readout-divider"></div>
-          <div class="radar-readout-stats">
-            <div><span>TRACKED</span><b id="radarTracked">-</b></div>
-            <div><span>NDL</span><b id="radarNdl" class="radar-stat-ndl">-</b></div>
-            <div><span>LEADS + NDL</span><b id="radarSum" class="radar-stat-sum">-</b></div>
-          </div>
-          <div class="radar-readout-divider"></div>
-          <div class="radar-readout-status">
-            <div>&#9654; SALESFORCE SYNCED <span class="radar-dot-ok">&#9679;</span></div>
-            <div>&#9654; SHEET LIVE <span class="radar-dot-ok">&#9679;</span></div>
-            <div id="radarWindow">&#9654; SCAN WINDOW: --</div>
-          </div>
+        <div class="tal-stat-card tal-stat-nontal pivot-cell-clickable" id="nonTalCountCard" title="Click to see Non-TAL leads">
+          <div class="tal-stat-label">Non-TAL Leads</div>
+          <div class="tal-stat-value" id="nonTalCount">-</div>
+          <div class="tal-stat-pct" id="nonTalPct">-</div>
         </div>
+      </div>
+      <div class="tal-widget-bar">
+        <div class="tal-widget-bar-tal" id="talWidgetBarTal"></div>
+      </div>
+
+      <div class="tal-funnel-table" id="talFunnelTable">
+        <div class="tal-funnel-row tal-funnel-head">
+          <span class="tal-funnel-label">Stage</span>
+          <span>TAL</span>
+          <span>Non-TAL</span>
+        </div>
+        <div class="tal-funnel-row" data-stage="iql">
+          <span class="tal-funnel-label">IQL</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelIqlTal">-</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelIqlNonTal">-</span>
+        </div>
+        <div class="tal-funnel-row" data-stage="mql">
+          <span class="tal-funnel-label">MQL</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMqlTal">-</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMqlNonTal">-</span>
+        </div>
+        <div class="tal-funnel-row" data-stage="sql">
+          <span class="tal-funnel-label">SQL</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelSqlTal">-</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelSqlNonTal">-</span>
+        </div>
+        <div class="tal-funnel-row" data-stage="mrr">
+          <span class="tal-funnel-label">MRR</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMrrTal">-</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMrrNonTal">-</span>
+        </div>
+      </div>
+
+      <div class="radar-readout-status tal-widget-status">
+        <div>&#9654; SALESFORCE SYNCED <span class="radar-dot-ok">&#9679;</span></div>
+        <div>&#9654; SHEET LIVE <span class="radar-dot-ok">&#9679;</span></div>
+        <div id="talWindow">&#9654; SCAN WINDOW: --</div>
       </div>
     </div>
   </div>
@@ -343,18 +434,23 @@
       <button type="button" class="subtab" data-channel="meta">Meta Ads</button>
       <button type="button" class="subtab" data-channel="email">Email</button>
       <button type="button" class="subtab" data-channel="whatsapp">WhatsApp</button>
-      <button type="button" class="compare-toggle hidden" id="spendsCompareToggle"></button>
-      <button type="button" class="compare-toggle-close hidden" id="spendsCompareClose" aria-label="Clear comparison" title="Clear comparison">&times;</button>
     </nav>
 
     <main>
       <section class="channel">
         <div class="pivot-wrap">
-          <button type="button" class="spends-group-toggle" id="spendsGroupToggle">
-            <span class="spends-group-arrow">&#9656;</span>
-            <span id="spendsGroupTitle">India Campaigns</span>
-            <span class="spends-group-meta" id="spendsGroupMeta"></span>
-          </button>
+          <div class="spends-group-bar">
+            <button type="button" class="spends-group-toggle" id="spendsGroupToggle">
+              <span class="spends-group-arrow">&#9656;</span>
+              <span id="spendsGroupTitle">India Campaigns</span>
+              <span class="spends-group-meta" id="spendsGroupMeta"></span>
+            </button>
+            <div class="spends-search-wrap">
+              <span class="spends-search-icon">&#128269;</span>
+              <input type="text" class="spends-search-input" id="spendsCampaignSearch" placeholder="Search campaigns...">
+              <button type="button" class="spends-search-clear hidden" id="spendsCampaignSearchClear" aria-label="Clear search">&times;</button>
+            </div>
+          </div>
           <div class="table-scroll" id="spendsTableWrap">
             <table class="pivot-table spends-table">
               <thead id="spendsTableHead">

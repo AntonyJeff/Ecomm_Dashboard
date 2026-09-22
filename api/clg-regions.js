@@ -20,6 +20,12 @@ const REGION_SHEETS = {
 // regardless of Lightning vs Classic, including converted leads.
 const SF_RECORD_BASE_URL = 'https://netcore.my.salesforce.com';
 
+// TAL/Non-TAL classification input -- see sync/daily_sync.py's sync_accounts()
+// for how this tab is populated (Marketing Region + Website Category filter,
+// no date bound -- a genuinely pre-existing TAL account can predate our
+// tracked lead history entirely).
+const ACCOUNTS_TAB_NAME = 'Global Ecomm TAL';
+
 // Leads pivots/charts by Sub Lead Source with a colored breakdown (matches the
 // "Digital India Ecomm Funnel View" report). IQL/MQL/SQL pivot by Lead Source
 // instead, and their top chart is a single plain bar per quarter with no
@@ -559,6 +565,220 @@ function pickSourceField(subLeadSource, sourceVal, utmCampaignVal) {
   return isGoogleAds ? (utmCampaign || source) : (source || utmCampaign);
 }
 
+// -- TAL / Non-TAL classification --------------------------------------------
+// TAL/Non-TAL is a COMPANY-level verdict, decided once from that company's
+// first-ever Ecomm lead touch, then applied to every lead from that company
+// forever after -- confirmed with the user via a worked example: a company
+// that gets its own Account created mid-funnel (e.g. meeting booked) stays
+// Non-TAL for every one of its leads, including ones that arrive later, even
+// though an Account now technically exists. Re-evaluating per lead would
+// retroactively relabel marketing's own progress as if it were inbound-into-
+// a-known-account, which is exactly backwards.
+//
+// Company matching is done on a normalized Company name against the Accounts
+// tab's Name column -- both are free-text-ish fields, so a plain trim/
+// lowercase under-counts real matches. Confirmed live: a lead's
+// Company = "Aditya Birla Fashion and Retail Ltd." failed to match the real
+// Account "Aditya Birla Fashion and Retail Limited" (created 2022, genuinely
+// before this lead's first touch) purely because "Ltd." != "Limited" -- this
+// silently misclassified a true TAL company as Non-TAL. Beyond
+// trim/lowercase/whitespace, this also folds "&" into "and" and strips common
+// trailing legal-entity suffixes (Ltd/Limited/Pvt/Private/Inc/LLC/Corp/Co...),
+// which is enough to fix that case. This is still a heuristic, not a
+// guarantee -- genuinely different names (abbreviations, typos, a completely
+// different legal entity for the same brand) won't match, so treat this as
+// "catches the common case," not "catches every case."
+// Periods are stripped before tokenizing (see below), so suffix tokens never
+// carry a trailing "." -- listed here without one for that reason.
+const COMPANY_SUFFIX_WORDS = new Set([
+  'pvt', 'private', 'ltd', 'limited', 'inc', 'incorporated',
+  'llc', 'llp', 'corp', 'corporation', 'co', 'company',
+]);
+function normalizeCompanyName(name) {
+  let s = (name || '').toString().trim().toLowerCase();
+  if (!s) return '';
+  s = s.replace(/&/g, ' and ');
+  s = s.replace(/[.,()\-]/g, ' ');
+  const tokens = s.split(/\s+/).filter(Boolean);
+  while (tokens.length > 1 && COMPANY_SUFFIX_WORDS.has(tokens[tokens.length - 1])) {
+    tokens.pop();
+  }
+  return tokens.join(' ');
+}
+
+// Company -> earliest known Account CreatedDate (if multiple Account rows
+// somehow share a normalized name, the earliest one is what matters for "did
+// an account already exist").
+//
+// Also indexes each Account under the text before " - ", because a real
+// naming convention in this Accounts tab is "Brand - Legal Entity Name" (e.g.
+// "Lorazzo - LRZ Innovations Pvt Ltd", "The Organic World - Sowparnika Retail
+// Private Limited") while the matching Lead's Company field is just the bare
+// brand ("Lorazzo") -- confirmed live for both examples above: the Account
+// genuinely predates the lead's first touch, so without this the company was
+// silently misclassified Non-TAL purely because the two name spellings didn't
+// line up, not because it isn't a real known account.
+function buildAccountCreatedMap(accountRows) {
+  const map = new Map();
+  if (accountRows.length < 2) return map;
+  const h = accountRows[0];
+  const nameCol = findCol(h, 'Name');
+  const dateCol = findCol(h, 'CreatedDate');
+  for (let i = 1; i < accountRows.length; i++) {
+    const row = accountRows[i];
+    const rawName = (row[nameCol] || '').toString();
+    const ts = parseDate(row[dateCol]);
+    if (ts === null) continue;
+
+    const norm = normalizeCompanyName(rawName);
+    if (norm && (!map.has(norm) || ts < map.get(norm))) map.set(norm, ts);
+
+    if (rawName.includes(' - ')) {
+      const brandNorm = normalizeCompanyName(rawName.split(' - ')[0]);
+      if (brandNorm && (!map.has(brandNorm) || ts < map.get(brandNorm))) map.set(brandNorm, ts);
+    }
+  }
+  return map;
+}
+
+// Company -> its first-ever lead CreatedDate, pooled across EVERY region's
+// qualified-lead sheet and NOT restricted to the dashboard's selected date
+// range -- the verdict must be based on the company's true first touch,
+// independent of whatever window is currently being viewed. (Bounded by
+// however far back the Leads sheets themselves go -- currently FY2026-04-01
+// onward, per daily_sync.py's FY_START_DATE.)
+function buildFirstTouchMap(leadRowsByRegion) {
+  const map = new Map();
+  for (const rows of leadRowsByRegion) {
+    if (rows.length < 2) continue;
+    const h = rows[0];
+    const companyCol = findCol(h, 'Company');
+    const dateCol = findCol(h, 'CreatedDate');
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const norm = normalizeCompanyName(row[companyCol]);
+      if (!norm) continue;
+      const ts = parseDate(row[dateCol]);
+      if (ts === null) continue;
+      if (!map.has(norm) || ts < map.get(norm)) map.set(norm, ts);
+    }
+  }
+  return map;
+}
+
+function buildTalVerdictMap(firstTouchMap, accountMap) {
+  const verdicts = new Map();
+  for (const [company, firstTouchTs] of firstTouchMap) {
+    const accountTs = accountMap.get(company);
+    verdicts.set(company, (accountTs !== undefined && accountTs < firstTouchTs) ? 'TAL' : 'Non-TAL');
+  }
+  return verdicts;
+}
+
+// Per-region breakdown of leads/IQL/MQL actually in the selected
+// [startTS, endTS] window -- the verdict lookup itself is unaffected by the
+// window (see buildFirstTouchMap above), only which rows get counted/listed
+// is. `dateField` defaults to the lead's own CreatedDate but IQL/MQL windows
+// on their own stage date instead (Meeting_Booked_Date__c /
+// Meeting_Executed_Date__c) -- both sheets share the exact same Company/Id/
+// Name/Title/Source columns as Leads (see sync_stage_for_region), so the same
+// function covers all three stages.
+function computeTalBreakdown(rows, startTS, endTS, verdictMap, dateField = 'CreatedDate') {
+  const result = { talCount: 0, nonTalCount: 0, talRecords: [], nonTalRecords: [] };
+  if (rows.length < 2) return result;
+
+  const h = rows[0];
+  const cols = {
+    createdDate: findCol(h, dateField),
+    id: findCol(h, 'Id'),
+    name: findCol(h, 'Name'),
+    company: findCol(h, 'Company'),
+    title: findCol(h, 'Title'),
+    source: findCol(h, 'Source__c'),
+    utmCampaign: findCol(h, 'Utm_Campaign__c'),
+    subLeadSource: findCol(h, 'Sub_Lead_Source_Category__c'),
+  };
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const ts = parseDate(row[cols.createdDate]);
+    if (!inRange(ts, startTS, endTS)) continue;
+
+    const norm = normalizeCompanyName(row[cols.company]);
+    // No company name / no lead-history match at all -> no known prior
+    // account, so Non-TAL is the safe/correct default.
+    const verdict = verdictMap.get(norm) || 'Non-TAL';
+
+    const record = {
+      id: row[cols.id] || '',
+      name: (row[cols.name] || '').toString().trim() || row[cols.id] || '(no name)',
+      company: (row[cols.company] || '').toString().trim(),
+      title: (row[cols.title] || '').toString().trim(),
+      source: pickSourceField(row[cols.subLeadSource], row[cols.source], row[cols.utmCampaign]),
+    };
+
+    if (verdict === 'TAL') { result.talCount += 1; result.talRecords.push(record); }
+    else { result.nonTalCount += 1; result.nonTalRecords.push(record); }
+  }
+  return result;
+}
+
+// SQL/MRR's TAL/Non-TAL split -- same verdict map (still keyed by company
+// name), but SQL is OpportunityLineItem rows, not Lead rows: no bare
+// "Company" field, Account_Name is the equivalent (and normalizes/matches the
+// Accounts tab's Name column exactly the same way), windowed by
+// SQL_Change_Date__c, and deduped by OpportunityId first -- multiple product
+// line items on the same deal must count as one opportunity (and its MRR
+// summed once), same rule buildSqlStage/sumSqlLineItems already follow.
+function computeSqlTalBreakdown(sqlRows, startTS, endTS, verdictMap) {
+  const result = { talCount: 0, nonTalCount: 0, talRecords: [], nonTalRecords: [], talMrr: 0, nonTalMrr: 0 };
+  if (sqlRows.length < 2) return result;
+
+  const h = sqlRows[0];
+  const cols = {
+    date: findCol(h, 'SQL_Change_Date__c'),
+    oppId: findCol(h, 'OpportunityId'),
+    oppName: findCol(h, 'Opportunity_Name'),
+    accountName: findCol(h, 'Account_Name'),
+    mrr: findCol(h, 'Product_Amount_MRR__c'),
+  };
+
+  const perOpp = new Map(); // OpportunityId -> { name, company, mrr }
+  for (let i = 1; i < sqlRows.length; i++) {
+    const row = sqlRows[i];
+    const ts = parseDate(row[cols.date]);
+    if (!inRange(ts, startTS, endTS)) continue;
+
+    const oppId = row[cols.oppId];
+    if (!oppId) continue;
+
+    if (!perOpp.has(oppId)) {
+      perOpp.set(oppId, {
+        name: (row[cols.oppName] || '').toString().trim() || oppId,
+        company: (row[cols.accountName] || '').toString().trim(),
+        mrr: 0,
+      });
+    }
+    perOpp.get(oppId).mrr += parseFloat(row[cols.mrr]) || 0;
+  }
+
+  for (const [oppId, opp] of perOpp) {
+    const norm = normalizeCompanyName(opp.company);
+    const verdict = verdictMap.get(norm) || 'Non-TAL';
+    const record = { id: oppId, name: opp.name, company: opp.company, title: '', source: '' };
+    if (verdict === 'TAL') {
+      result.talCount += 1;
+      result.talMrr += opp.mrr;
+      result.talRecords.push(record);
+    } else {
+      result.nonTalCount += 1;
+      result.nonTalMrr += opp.mrr;
+      result.nonTalRecords.push(record);
+    }
+  }
+  return result;
+}
+
 // Leads tab IQL/MQL columns: same idea as computeSqlByRow below, but these
 // are still plain Lead-object sheets (IQL/MQL sync fetches the same Lead
 // fields as Leads, just windowed on a different date field) -- no
@@ -608,6 +828,49 @@ function computeStageCountByRow(stageRows, dateFieldName, startTS, endTS) {
     });
   }
   return byRow;
+}
+
+// Trends-chart-only breakdown by Sub Lead Source Category, independent of a
+// stage's own pivot-table row dimension (IQL pivots by Lead Source, MQL by
+// Owner Team -- but per user request, their TRENDS chart should show the same
+// "where did this come from" differentiation the Leads chart already has,
+// not repeat the pivot table's own axis). Same Growth Marketing LeadSource
+// reroute rule as buildStage's own Sub Lead Source grouping, for the same
+// reason (Growth Marketing leads don't reliably carry a Sub Lead Source
+// Category value).
+function computeSubSourceTrendChart(rows, dateFieldName, startTS, endTS) {
+  if (rows.length < 2) return { chart: [], subSourceOrder: [] };
+  const h = rows[0];
+  const cols = {
+    dateField: findCol(h, dateFieldName),
+    subLeadSource: findCol(h, 'Sub_Lead_Source_Category__c'),
+    leadSource: findCol(h, 'LeadSource'),
+  };
+  const byQuarterSub = new Map();
+  const subTotals = new Map();
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    const ts = parseDate(row[cols.dateField]);
+    if (!inRange(ts, startTS, endTS)) continue;
+    const isGrowthMarketingLead = (row[cols.leadSource] || '').toString().trim() === 'Growth Marketing';
+    const subSource = isGrowthMarketingLead
+      ? 'Growth Marketing'
+      : (row[cols.subLeadSource] || '').toString().trim() || 'Inbound Leads';
+    const quarter = fyQuarterLabel(ts);
+    if (!byQuarterSub.has(quarter)) byQuarterSub.set(quarter, new Map());
+    const qMap = byQuarterSub.get(quarter);
+    qMap.set(subSource, (qMap.get(subSource) || 0) + 1);
+    subTotals.set(subSource, (subTotals.get(subSource) || 0) + 1);
+  }
+  const subSourceOrder = [...subTotals.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+  const quarters = [...byQuarterSub.keys()].sort((a, b) => fyQuarterSort(a) - fyQuarterSort(b));
+  const chart = quarters.map(quarter => ({
+    quarter,
+    bars: subSourceOrder
+      .map(subSource => ({ subSource, count: byQuarterSub.get(quarter).get(subSource) || 0 }))
+      .filter(b => b.count > 0),
+  }));
+  return { chart, subSourceOrder };
 }
 
 // A bucket (quarter + Sub Lead Source) can have real IQL/MQL/SQL data with
@@ -779,8 +1042,9 @@ function sumSqlLineItems(items) {
 function emptySqlStageResult(regionCfg) {
   return {
     totalRecords: 0, chartMode: 'breakdown', dateAxisLabel: 'SQL Change Date',
+    chartInnerLabel: 'Opportunity Sub Source',
     kpiKeys: regionCfg.kpiKeys, fixedDateRange: regionCfg.fixedDateRange || null, subSourceOrder: [], chart: [],
-    mrrTrend: [],
+    mrrTrend: [], mrrChart: [],
     table: { columns: SQL_METRIC_COLUMNS, rows: [], grandTotal: emptySqlMetrics() },
   };
 }
@@ -828,19 +1092,8 @@ function buildSqlStage(rows, startTS, endTS, regionCfg) {
 
   if (!items.length) return emptySqlStageResult(regionCfg);
 
-  // Chart: flat bars grouped by Source -> Sub Source (no quarter dimension at
-  // all -- matches the report's own top chart), bar length = distinct
-  // Opportunity count for that pair.
-  const bySourceSub = new Map(); // source -> Map(subSource -> items[])
-  for (const item of items) {
-    if (!bySourceSub.has(item.source)) bySourceSub.set(item.source, new Map());
-    const sMap = bySourceSub.get(item.source);
-    if (!sMap.has(item.subSource)) sMap.set(item.subSource, []);
-    sMap.get(item.subSource).push(item);
-  }
   const subSourceOrder = [...new Set(items.map(i => i.subSource))]
     .sort((a, b) => (SQL_SUBSOURCE_RANK.get(a) ?? 999) - (SQL_SUBSOURCE_RANK.get(b) ?? 999));
-  const sourcesPresent = [...bySourceSub.keys()].sort((a, b) => (SQL_SOURCE_RANK.get(a) ?? 999) - (SQL_SOURCE_RANK.get(b) ?? 999));
   // The bar metric itself differs by region: India's chart is "Sum of
   // Opportunity Count" (distinct opportunities); SEA's is "Sum of Product
   // Amount(MRR)" -- confirmed against each report's own axis label and values
@@ -849,12 +1102,6 @@ function buildSqlStage(rows, startTS, endTS, regionCfg) {
   const barValue = (subItems) => regionCfg.chartMetric === 'mrr'
     ? subItems.reduce((sum, i) => sum + i.mrr, 0)
     : new Set(subItems.map(i => i.oppId)).size;
-  const chart = sourcesPresent.map(source => ({
-    quarter: source,
-    bars: [...bySourceSub.get(source).entries()]
-      .sort((a, b) => (SQL_SUBSOURCE_RANK.get(a[0]) ?? 999) - (SQL_SUBSOURCE_RANK.get(b[0]) ?? 999))
-      .map(([subSource, subItems]) => ({ subSource, count: barValue(subItems) })),
-  }));
 
   // Table: Quarter -> Source -> SubSource, three levels, subtotal after each
   // Source and after each Quarter, one grand Total row at the very end.
@@ -864,6 +1111,26 @@ function buildSqlStage(rows, startTS, endTS, regionCfg) {
     byQuarter.get(item.quarter).push(item);
   }
   const quarters = [...byQuarter.keys()].sort((a, b) => fyQuarterSort(a) - fyQuarterSort(b));
+
+  // Trends-tab chart -- Quarter -> Opportunity Sub Source breakdown, same
+  // shape as the Lead/IQL/MQL trend charts (quarter on the x-axis, a colored
+  // bar per Sub Source), so SQL's Trends tab reads consistently with the
+  // other three stages instead of the report's own top chart (Source ->
+  // Sub Source with no time axis at all, which is what this used to render).
+  const chart = quarters.map(quarter => {
+    const quarterItems = byQuarter.get(quarter);
+    const bySub = new Map();
+    for (const item of quarterItems) {
+      if (!bySub.has(item.subSource)) bySub.set(item.subSource, []);
+      bySub.get(item.subSource).push(item);
+    }
+    return {
+      quarter,
+      bars: [...bySub.entries()]
+        .sort((a, b) => (SQL_SUBSOURCE_RANK.get(a[0]) ?? 999) - (SQL_SUBSOURCE_RANK.get(b[0]) ?? 999))
+        .map(([subSource, subItems]) => ({ subSource, count: barValue(subItems) })),
+    };
+  });
 
   const tableRows = [];
   for (const quarter of quarters) {
@@ -904,15 +1171,32 @@ function buildSqlStage(rows, startTS, endTS, regionCfg) {
   // every Source/SubSource for that quarter), for the Trends tab's MRR chart.
   const mrrTrend = quarters.map(quarter => ({ quarter, mrr: sumSqlLineItems(byQuarter.get(quarter)).mrr }));
 
+  // MRR breakdown chart -- same differentiation the main chart above already
+  // shows (Opportunity Sub Source), just summing dollars instead of counting
+  // opportunities, per user request for the same "where did this come from"
+  // view on the MRR trend too.
+  const mrrChart = quarters.map(quarter => {
+    const quarterItems = byQuarter.get(quarter);
+    const bySub = new Map();
+    for (const item of quarterItems) bySub.set(item.subSource, (bySub.get(item.subSource) || 0) + item.mrr);
+    const bars = [...bySub.entries()]
+      .sort((a, b) => (SQL_SUBSOURCE_RANK.get(a[0]) ?? 999) - (SQL_SUBSOURCE_RANK.get(b[0]) ?? 999))
+      .filter(([, mrr]) => mrr > 0)
+      .map(([subSource, mrr]) => ({ subSource, count: mrr }));
+    return { quarter, bars };
+  });
+
   return {
     totalRecords: items.length,
     chartMode: 'breakdown',
     dateAxisLabel: 'SQL Change Date',
+    chartInnerLabel: 'Opportunity Sub Source',
     kpiKeys: regionCfg.kpiKeys,
     fixedDateRange: regionCfg.fixedDateRange || null,
     subSourceOrder,
     chart,
     mrrTrend,
+    mrrChart,
     table: { columns: SQL_METRIC_COLUMNS, rows: tableRows, grandTotal: sumSqlLineItems(items) },
   };
 }
@@ -958,7 +1242,19 @@ export default async function handler(req, res) {
         jobs.push({ region, stageKey, sheetName: stageSheets[stageKey] });
       }
     }
-    const tabData = await Promise.all(jobs.map(j => getTab(j.sheetName)));
+    const [accountsRows, ...tabData] = await Promise.all([
+      getTab(ACCOUNTS_TAB_NAME),
+      ...jobs.map(j => getTab(j.sheetName)),
+    ]);
+
+    // Built once, globally -- see buildTalVerdictMap for why this ignores the
+    // requested [startTS, endTS] window entirely (the verdict comes from each
+    // company's true first touch, not from whatever's currently on screen).
+    const leadRowsByRegion = Object.keys(REGION_SHEETS).map(region => {
+      const idx = jobs.findIndex(j => j.region === region && j.stageKey === 'lead');
+      return tabData[idx];
+    });
+    const talVerdictMap = buildTalVerdictMap(buildFirstTouchMap(leadRowsByRegion), buildAccountCreatedMap(accountsRows));
 
     const result = {};
     jobs.forEach((job, i) => {
@@ -969,7 +1265,9 @@ export default async function handler(req, res) {
           const [sqlStartTS, sqlEndTS] = regionCfg.fixedDateRange
             ? [dayTS(regionCfg.fixedDateRange[0]), dayTS(regionCfg.fixedDateRange[1])]
             : [startTS, endTS];
-          return { label: 'SQL', ...buildSqlStage(tabData[i], sqlStartTS, sqlEndTS, regionCfg) };
+          const sqlStage = buildSqlStage(tabData[i], sqlStartTS, sqlEndTS, regionCfg);
+          sqlStage.tal = computeSqlTalBreakdown(tabData[i], sqlStartTS, sqlEndTS, talVerdictMap);
+          return { label: 'SQL', ...sqlStage };
         })()
         : (() => {
           const cfg = getStageConfig(job.region, job.stageKey);
@@ -1011,6 +1309,20 @@ export default async function handler(req, res) {
             injectStageCountColumn(stageResult.pivot, 'Meeting Executed (MQL)', mqlByRowScoped);
             injectStageCountColumn(stageResult.pivot, 'Converted (SQL)', sqlCountByRow);
             injectMrrColumn(stageResult.pivot, sqlByRow);
+
+            stageResult.tal = computeTalBreakdown(tabData[i], startTS, endTS, talVerdictMap);
+          } else if (job.stageKey === 'iql' || job.stageKey === 'mql') {
+            const dateField = job.stageKey === 'iql' ? 'Meeting_Booked_Date__c' : 'Meeting_Executed_Date__c';
+            stageResult.tal = computeTalBreakdown(tabData[i], startTS, endTS, talVerdictMap, dateField);
+            // Trends tab: same Sub Lead Source differentiation as the Leads
+            // chart, in place of the "simple" single bar per quarter -- the
+            // pivot table above (grouped by Lead Source / Owner Team) is left
+            // untouched, only the chart's own data/mode is overridden.
+            const subChart = computeSubSourceTrendChart(tabData[i], dateField, startTS, endTS);
+            stageResult.chart = subChart.chart;
+            stageResult.subSourceOrder = subChart.subSourceOrder;
+            stageResult.chartMode = 'breakdown';
+            stageResult.chartInnerLabel = 'Sub Lead Source';
           }
           return { label: cfg.label, ...stageResult };
         })();
