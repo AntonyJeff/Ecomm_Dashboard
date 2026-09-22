@@ -5,27 +5,26 @@ const fmtDec = (n) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maxi
 // matches the dataviz reference palette, validated for CVD-safe adjacent pairs.
 const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
 
-// LATAM has no Salesforce filter/sync built yet -- the API already resolves
-// it to a clean all-zero region (see REGION_SHEETS in api/clg-regions.js), so
-// it's safe to list here now and wire up real data later.
 const REGIONS = [
   { key: 'India', color: PALETTE[0] },
   { key: 'SEA', color: PALETTE[1] },
   { key: 'EU', color: PALETTE[2] },
   { key: 'LATAM', color: PALETTE[3] },
+  { key: 'MEA', color: PALETTE[4] },
 ];
 
-// Email/WhatsApp (Spends tab only, see api/clg-spends.js) also carry an MEA
-// (Middle East & Africa) region that LinkedIn/Meta Ads don't have yet -- kept
-// out of the shared REGIONS list above so the Leads/Trends region filter,
-// which has no MEA Salesforce data, never shows it.
-const SPENDS_MESSAGING_REGIONS = [...REGIONS, { key: 'MEA', color: PALETTE[4] }];
+// Spends is a separate ad-spend data source (api/clg-spends.js) from the
+// Leads/Trends Salesforce sync above -- MEA has Email/WhatsApp spend data
+// but no LinkedIn/Meta Ads spend data, independent of whether MEA has
+// Salesforce CRM data (it now does, hence MEA being in REGIONS above).
+const SPENDS_MESSAGING_REGIONS = REGIONS;
+const SPENDS_PAID_REGIONS = REGIONS.filter(r => r.key !== 'MEA');
 const MESSAGING_CHANNELS = new Set(['email', 'whatsapp']);
 function spendsIsMessaging() {
   return MESSAGING_CHANNELS.has(spendsActiveChannel);
 }
 function spendsRegionsForChannel() {
-  return spendsIsMessaging() ? SPENDS_MESSAGING_REGIONS : REGIONS;
+  return spendsIsMessaging() ? SPENDS_MESSAGING_REGIONS : SPENDS_PAID_REGIONS;
 }
 
 let activeRegion = 'India';
@@ -506,8 +505,7 @@ function renderOverviewSpends() {
 }
 
 // ---- Region filter: a compact dropdown in the topbar (replaces the old
-// donut+legend widget) -- static option list since the Leads dashboard only
-// ever has India/SEA/EU/LATAM data, plus "All Regions". ----
+// donut+legend widget), built from REGIONS, plus "All Regions". ----
 function populateRegionSelectLeads() {
   const sel = document.getElementById('regionSelectLeads');
   sel.innerHTML = ['All', ...REGIONS.map(r => r.key)]
@@ -540,10 +538,13 @@ function radarToXY(deg, r) {
 // verdict, exactly like every other Leads-tab number.
 function renderTalWidget() {
   const regionsToSum = activeRegion === 'All' ? REGIONS.map(r => r.key) : [activeRegion];
-  let talCount = 0, nonTalCount = 0, talRecords = [], nonTalRecords = [];
+  let talCount = 0, nonTalCount = 0, talRecords = [], nonTalRecords = [], accountCount = 0;
   if (lastData) {
     for (const region of regionsToSum) {
-      const tal = lastData.regions[region] && lastData.regions[region].lead.tal;
+      const regionData = lastData.regions[region];
+      if (!regionData) continue;
+      accountCount += regionData.talAccountCount || 0;
+      const tal = regionData.lead && regionData.lead.tal;
       if (!tal) continue;
       talCount += tal.talCount;
       nonTalCount += tal.nonTalCount;
@@ -561,6 +562,7 @@ function renderTalWidget() {
   document.getElementById('nonTalPct').textContent = total ? `${fmtDec(nonTalPct)}% of leads` : '—';
   document.getElementById('talWindow').textContent = `▶ SCAN WINDOW: ${currentStartDate} → ${currentEndDate}`;
   document.getElementById('talWidgetBarTal').style.width = `${total ? talPct : 50}%`;
+  document.getElementById('talFunnelAccountsTal').textContent = fmtInt(accountCount);
 
   const talCard = document.getElementById('talCountCard');
   const nonTalCard = document.getElementById('nonTalCountCard');
@@ -1100,6 +1102,12 @@ let spendsSearchQuery = '';
 // search box currently matches), instead of the full region/channel totals.
 let spendsSelectedCampaigns = new Set();
 
+// Table sort -- null key means "as returned" (the sheet's own order).
+// sortKey is 'name' for the Campaign Name column, or a SPENDS_TABLE_COLUMNS
+// entry's key (e.g. 'leadCount') for any other sortable header.
+let spendsSortKey = null;
+let spendsSortDir = 'desc';
+
 let spendsPendingRangeStart = null;
 let spendsDraftStartDate = null;
 let spendsDraftEndDate = null;
@@ -1376,7 +1384,7 @@ const SPENDS_TOTAL_KEYS = {
 
 function spendsAggregateChannel(dataset, channel) {
   const isMsg = MESSAGING_CHANNELS.has(channel);
-  const regions = (isMsg ? SPENDS_MESSAGING_REGIONS : REGIONS).map(r => r.key);
+  const regions = (isMsg ? SPENDS_MESSAGING_REGIONS : SPENDS_PAID_REGIONS).map(r => r.key);
   const totalKeys = SPENDS_TOTAL_KEYS[isMsg ? 'messaging' : 'paid'];
   const totals = {};
   totalKeys.forEach(k => { totals[k] = 0; });
@@ -1543,7 +1551,18 @@ function spendsRenderTable(skipRowAnim) {
   const channelData = spendsGetChannelData(spendsLastData, spendsActiveRegion, spendsActiveChannel);
   const allCampaigns = channelData.campaigns;
   const query = spendsSearchQuery.trim().toLowerCase();
-  const campaigns = query ? allCampaigns.filter(c => c.name.toLowerCase().includes(query)) : allCampaigns;
+  const searchFiltered = query ? allCampaigns.filter(c => c.name.toLowerCase().includes(query)) : allCampaigns;
+  // Ascending/descending sort by whichever column header was last clicked
+  // (see spendsTableHead's click handler below) -- 'name' sorts the Campaign
+  // Name column alphabetically, any other key is a numeric SPENDS_TABLE_
+  // COLUMNS field (Leads, NDL, DL, Amount Spent, etc).
+  const campaigns = spendsSortKey ? [...searchFiltered].sort((a, b) => {
+    const av = spendsSortKey === 'name' ? a.name.toLowerCase() : (a[spendsSortKey] || 0);
+    const bv = spendsSortKey === 'name' ? b.name.toLowerCase() : (b[spendsSortKey] || 0);
+    if (av < bv) return spendsSortDir === 'asc' ? -1 : 1;
+    if (av > bv) return spendsSortDir === 'asc' ? 1 : -1;
+    return 0;
+  }) : searchFiltered;
   const isMsg = spendsIsMessaging();
 
   // Totals (KPI tiles + footer row) reflect the checkbox selection when one
@@ -1568,13 +1587,22 @@ function spendsRenderTable(skipRowAnim) {
 
   const cols = SPENDS_TABLE_COLUMNS[isMsg ? 'messaging' : 'paid'];
 
+  const sortArrow = (key) => spendsSortKey !== key ? '' : (spendsSortDir === 'asc' ? ' &#9650;' : ' &#9660;');
   document.getElementById('spendsTableHead').innerHTML = `
     <tr>
       <th class="spends-th-check"><input type="checkbox" id="spendsSelectAllCheckbox" title="Select all"></th>
-      <th class="pin pin-quarter spends-th-name">Campaign Name</th>
-      ${cols.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}
+      <th class="pin pin-quarter spends-th-name spends-th-sortable" data-sort-key="name">Campaign Name${sortArrow('name')}</th>
+      ${cols.map(c => `<th class="spends-th-sortable" data-sort-key="${c.key}">${escapeHtml(c.label)}${sortArrow(c.key)}</th>`).join('')}
     </tr>
   `;
+  document.getElementById('spendsTableHead').onclick = (e) => {
+    const th = e.target.closest('.spends-th-sortable');
+    if (!th) return;
+    const key = th.dataset.sortKey;
+    spendsSortDir = spendsSortKey === key ? (spendsSortDir === 'asc' ? 'desc' : 'asc') : 'desc';
+    spendsSortKey = key;
+    spendsRenderTable(true);
+  };
   const selectAllBox = document.getElementById('spendsSelectAllCheckbox');
   const allChecked = campaigns.length > 0 && campaigns.every(c => spendsSelectedCampaigns.has(c.name));
   selectAllBox.checked = allChecked;

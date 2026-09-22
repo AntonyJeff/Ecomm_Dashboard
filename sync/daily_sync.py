@@ -147,6 +147,19 @@ STANDARD_LEAD_SOURCE_CLAUSE = (
     f"OR Attendee_Source__c = 'ABM')"
 )
 
+# LATAM/MEA Leads/IQL/MQL filters (given directly by the user) are genuinely
+# simpler than India/SEA/EU's -- just LeadSource + Region, no vertical filter,
+# no Source__c exclusion, no Attendee_Source__c OR-clause. Region__c (label
+# "Region" in the report UI) is a DIFFERENT field from Marketing_Region__c --
+# confirmed via live Lead schema describe: Region__c is a picklist with
+# exactly ['EU', 'India', 'LATAM', 'MEA', 'North America', 'Others', 'SEA'],
+# matching the report's filter values, where Marketing_Region__c is a plain
+# string field used elsewhere (Account TAL matching) instead.
+LATAM_MEA_LEAD_SOURCE_VALUES = [
+    'ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia',
+    'Insent/ChatBot', 'Intercom', 'Digital', 'Factors Engaged', 'Influ 2 Engaged',
+]
+
 REGION_LEAD_FILTERS = {
     'India': {
         'sheet': 'india_ecomm_lead',
@@ -176,6 +189,20 @@ REGION_LEAD_FILTERS = {
             f"{STANDARD_LEAD_SOURCE_CLAUSE} "
             f"AND {VERTICAL_CLAUSE} "
             f"AND Owner_Sub_Team__c LIKE '%europe%'"
+        ),
+    },
+    'LATAM': {
+        'sheet': 'latam_ecomm_lead',
+        'where': lambda: (
+            f"LeadSource IN {soql_in(LATAM_MEA_LEAD_SOURCE_VALUES)} "
+            f"AND Region__c = 'LATAM'"
+        ),
+    },
+    'MEA': {
+        'sheet': 'mea_ecomm_lead',
+        'where': lambda: (
+            f"LeadSource IN {soql_in(LATAM_MEA_LEAD_SOURCE_VALUES)} "
+            f"AND Region__c = 'MEA'"
         ),
     },
 }
@@ -232,6 +259,22 @@ IQL_LEAD_FILTERS = {
             f"AND Owner_Sub_Team__c LIKE '%europe%'"
         ),
     },
+    'LATAM': {
+        'sheet': 'latam_ecomm_iql',
+        'dateField': 'Meeting_Booked_Date__c',
+        'where': lambda: (
+            f"LeadSource IN {soql_in(LATAM_MEA_LEAD_SOURCE_VALUES)} "
+            f"AND Region__c = 'LATAM'"
+        ),
+    },
+    'MEA': {
+        'sheet': 'mea_ecomm_iql',
+        'dateField': 'Meeting_Booked_Date__c',
+        'where': lambda: (
+            f"LeadSource IN {soql_in(LATAM_MEA_LEAD_SOURCE_VALUES)} "
+            f"AND Region__c = 'MEA'"
+        ),
+    },
 }
 
 # -- MQL funnel filters, one per region -- standardized template (given
@@ -283,6 +326,27 @@ MQL_LEAD_FILTERS = {
             f"{MQL_LEAD_SOURCE_CLAUSE} "
             f"AND {MQL_VERTICAL_CLAUSE} "
             f"AND Owner_Sub_Team__c LIKE '%europe%'"
+        ),
+    },
+    # LATAM/MEA MQL adds one more filter beyond Leads/IQL's shape: "MQL equals
+    # Yes" -- confirmed live via Lead schema describe that this is MQL__c, a
+    # PICKLIST (not a checkbox) with values ['Yes', 'No'].
+    'LATAM': {
+        'sheet': 'latam_ecomm_mql',
+        'dateField': 'Meeting_Executed_Date__c',
+        'where': lambda: (
+            f"LeadSource IN {soql_in(LATAM_MEA_LEAD_SOURCE_VALUES)} "
+            f"AND Region__c = 'LATAM' "
+            f"AND MQL__c = 'Yes'"
+        ),
+    },
+    'MEA': {
+        'sheet': 'mea_ecomm_mql',
+        'dateField': 'Meeting_Executed_Date__c',
+        'where': lambda: (
+            f"LeadSource IN {soql_in(LATAM_MEA_LEAD_SOURCE_VALUES)} "
+            f"AND Region__c = 'MEA' "
+            f"AND MQL__c = 'Yes'"
         ),
     },
 }
@@ -344,6 +408,30 @@ SQL_OPPORTUNITY_FILTERS = {
             f"AND Opportunity.Owner_Sub_Team__c LIKE '%europe%' "
             f"AND (Opportunity.Account.ABM_Industry_Vertical__c IN {soql_in(['E-Comm/D2C', 'Lifestyle', 'Retail', 'Conglomerate', 'QSR'])} "
             f"OR ({soql_contains_terms('Opportunity.Account.Website_Category__c', ['e-comm', 'ecomm', 'retail', 'd2c'])}))"
+        ),
+    },
+    # LATAM/MEA SQL filters (given directly by the user) use a dynamic
+    # "Current FY" window like India (no fixedDateRange, unlike SEA/EU's fixed
+    # prior-FY), a different Opportunity Type list (Up Sell instead of Cross
+    # Sell alongside it), and filter on Opportunity.Marketing_Region__c
+    # directly (a field that already exists and is already used for Account
+    # matching -- confirmed live: real Opportunity rows carry the exact
+    # values 'LATAM' and 'MEA' in this field) rather than Owner_Sub_Team__c or
+    # a vertical/website-category clause.
+    'LATAM': {
+        'sheet': 'latam_ecomm_sql',
+        'where': lambda: (
+            f"Opportunity.Opportunity_Source__c IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Intercom', 'Insent/ChatBot', 'Digital Agency', 'Digital', 'Factors Engaged', 'Influ 2 Engaged'])} "
+            f"AND Opportunity.Type IN {soql_in(['New Business', 'New', 'Up Sell', 'Cross Sell', 'New (Expansion)'])} "
+            f"AND Opportunity.Marketing_Region__c = 'LATAM'"
+        ),
+    },
+    'MEA': {
+        'sheet': 'mea_ecomm_sql',
+        'where': lambda: (
+            f"Opportunity.Opportunity_Source__c IN {soql_in(['ABM', 'Growth Marketing', 'Inbound Lead', 'ABM Safal Imperia', 'Intercom', 'Insent/ChatBot', 'Digital Agency', 'Digital', 'Factors Engaged', 'Influ 2 Engaged'])} "
+            f"AND Opportunity.Type IN {soql_in(['New Business', 'New', 'Up Sell', 'Cross Sell', 'New (Expansion)'])} "
+            f"AND Opportunity.Marketing_Region__c = 'MEA'"
         ),
     },
 }

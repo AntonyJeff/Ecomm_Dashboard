@@ -1153,7 +1153,10 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 
 /* IQL/MQL/SQL/MRR TAL-vs-Non-TAL mini-table -- same underlying company
    verdict as the two Lead cards above, just summed from each stage's own
-   sheet (see renderTalFunnelTable). */
+   sheet (see renderTalFunnelTable). The "Total Accounts" row is the one
+   exception: it's the Global Ecomm TAL accounts sheet's own count (region-
+   scoped, not date-scoped), TAL-side only -- Non-TAL has no account concept
+   by definition, so that cell just shows a dash. */
 .tal-funnel-table {
   display: flex;
   flex-direction: column;
@@ -1170,6 +1173,8 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 .tal-funnel-label { color: #cbd5e1; font-weight: 600; }
 .tal-funnel-val { text-align: left; cursor: pointer; color: #a29bfe; }
 .tal-funnel-val:hover { text-decoration: underline; }
+.tal-funnel-val-na { cursor: default; color: #334155; }
+.tal-funnel-val-na:hover { text-decoration: none; }
 
 .tal-widget-status { display: flex; flex-direction: column; gap: 4px; }
 .radar-stat-sum { color: #a29bfe !important; }
@@ -1284,6 +1289,9 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 }
 .spends-table th:not(.pin), .spends-table td:not(.pin) { text-align: right; }
 .spends-td-nolead { color: #334155; }
+
+.spends-th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.spends-th-sortable:hover { color: var(--accent, #a29bfe); }
 
 .spends-th-check, .spends-td-check {
   width: 32px;

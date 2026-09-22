@@ -8,11 +8,8 @@ const REGION_SHEETS = {
   India: { lead: 'india_ecomm_lead', iql: 'india_ecomm_iql', mql: 'india_ecomm_mql', sql: 'india_ecomm_sql' },
   SEA: { lead: 'sea_ecomm_lead', iql: 'sea_ecomm_iql', mql: 'sea_ecomm_mql', sql: 'sea_ecomm_sql' },
   EU: { lead: 'eu_ecomm_lead', iql: 'eu_ecomm_iql', mql: 'eu_ecomm_mql', sql: 'eu_ecomm_sql' },
-  // Placeholder region -- no Salesforce filter/sync built yet ("we will do
-  // that for later" per user). Sheet names intentionally don't exist yet;
-  // getTab()'s try/catch already treats a missing sheet as "no data" for any
-  // region, so this resolves to a clean empty state everywhere automatically.
   LATAM: { lead: 'latam_ecomm_lead', iql: 'latam_ecomm_iql', mql: 'latam_ecomm_mql', sql: 'latam_ecomm_sql' },
+  MEA: { lead: 'mea_ecomm_lead', iql: 'mea_ecomm_iql', mql: 'mea_ecomm_mql', sql: 'mea_ecomm_sql' },
 };
 
 // Same org domain daily_sync.py logs into (SF_LOGIN_URL there) -- a bare
@@ -639,6 +636,22 @@ function buildAccountCreatedMap(accountRows) {
     }
   }
   return map;
+}
+
+// Total size of a region's known TAL account universe (unbounded by date,
+// same as the rest of this sheet) -- feeds the funnel widget's "Total TAL
+// Accounts" top stage. Non-TAL has no equivalent concept: by definition a
+// Non-TAL company has no pre-existing Account, so there's no account count
+// to show for it.
+function countTalAccountsByRegion(accountRows, region) {
+  if (accountRows.length < 2) return 0;
+  const h = accountRows[0];
+  const regionCol = findCol(h, 'Marketing_Region__c');
+  let count = 0;
+  for (let i = 1; i < accountRows.length; i++) {
+    if ((accountRows[i][regionCol] || '').toString().trim() === region) count++;
+  }
+  return count;
 }
 
 // Company -> its first-ever lead CreatedDate, pooled across EVERY region's
@@ -1327,6 +1340,11 @@ export default async function handler(req, res) {
           return { label: cfg.label, ...stageResult };
         })();
     });
+
+    for (const region of Object.keys(REGION_SHEETS)) {
+      if (!result[region]) result[region] = {};
+      result[region].talAccountCount = countTalAccountsByRegion(accountsRows, region);
+    }
 
     res.status(200).json({ startDate, endDate, regions: result, sfRecordBaseUrl: SF_RECORD_BASE_URL, lastUpdated: new Date().toISOString() });
   } catch (err) {
