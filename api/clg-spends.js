@@ -80,12 +80,15 @@ function inRange(ts, startTS, endTS) {
 
 // -- Campaign -> Leads attribution --------------------------------------------
 // A lead's Source__c holds the exact ad campaign name it came from (same
-// naming convention as these LinkedIn/Facebook sheets' Campaign Name column --
-// see pickSourceField in api/clg-regions.js, reproduced here for the one
-// exception: Google Ads leads carry the campaign name in Utm_Campaign__c
-// instead). Matching this against a campaign's own name (case/whitespace
-// normalized) tells us how many leads that specific campaign directly
-// produced, scoped to whatever date range is currently selected.
+// naming convention as these LinkedIn/Facebook sheets' Campaign Name column),
+// except for Google Ads leads, which carry the campaign name in
+// Utm_Campaign__c instead -- pickSourceField below handles that split and is
+// an exact copy of api/clg-regions.js's own pickSourceField (same
+// self-contained-per-file convention as findCol/dayTS/parseDate/inRange
+// above, not a divergent implementation). Matching this against a campaign's
+// own name (case/whitespace normalized) tells us how many leads that
+// specific campaign directly produced, scoped to whatever date range is
+// currently selected.
 //
 // Only India/SEA/EU have a synced Leads sheet so far (LATAM's is "we'll do
 // that later" per the user) -- LATAM/MEA campaigns simply get 0 leads until
@@ -382,23 +385,28 @@ export default async function handler(req, res) {
     const sheets = google.sheets({ version: 'v4', auth: client });
     const sheetId = process.env.CLG_SHEET_ID;
 
-    const getTab = async (tab) => {
-      try {
-        const r = await sheets.spreadsheets.values.get({
-          spreadsheetId: sheetId,
-          range: tab,
-          valueRenderOption: 'UNFORMATTED_VALUE',
-        });
-        return r.data.values || [];
-      } catch (err) {
-        return [];
-      }
-    };
+    // See api/clg-regions.js for why this is one batchGet instead of one
+    // values.get() per tab -- same fix, same reasoning (this handler runs
+    // alongside that one on every load, so its own N separate round trips were
+    // doubling the total wait).
+    const sheetMeta = await sheets.spreadsheets.get({ spreadsheetId: sheetId, fields: 'sheets.properties.title' });
+    const existingTabs = new Set((sheetMeta.data.sheets || []).map(s => s.properties.title));
 
-    const [linkedinRows, facebookRows, emailRows, whatsappRows, ...leadRowsByRegion] = await Promise.all([
-      getTab('Linkedin'), getTab('Facebook'), getTab('Email'), getTab('Whatsapp'),
-      ...Object.values(REGION_LEAD_SHEETS).map(getTab),
-    ]);
+    const allTabNames = ['Linkedin', 'Facebook', 'Email', 'Whatsapp', ...Object.values(REGION_LEAD_SHEETS)];
+    const rangesToFetch = allTabNames.filter(name => existingTabs.has(name));
+
+    const batch = rangesToFetch.length
+      ? await sheets.spreadsheets.values.batchGet({
+        spreadsheetId: sheetId,
+        ranges: rangesToFetch,
+        valueRenderOption: 'UNFORMATTED_VALUE',
+      })
+      : { data: { valueRanges: [] } };
+    const rowsByRange = new Map(rangesToFetch.map((name, i) => [name, batch.data.valueRanges[i].values || []]));
+    const getTabRows = (name) => rowsByRange.get(name) || [];
+
+    const [linkedinRows, facebookRows, emailRows, whatsappRows] = ['Linkedin', 'Facebook', 'Email', 'Whatsapp'].map(getTabRows);
+    const leadRowsByRegion = Object.values(REGION_LEAD_SHEETS).map(getTabRows);
 
     const leadsByRegion = {};
     Object.keys(REGION_LEAD_SHEETS).forEach((region, i) => {

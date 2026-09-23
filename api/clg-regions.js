@@ -572,8 +572,18 @@ function pickSourceField(subLeadSource, sourceVal, utmCampaignVal) {
 // retroactively relabel marketing's own progress as if it were inbound-into-
 // a-known-account, which is exactly backwards.
 //
+// The "Global Ecomm TAL" tab was rebuilt 2026-09-23 into a hand-curated
+// ~2,000-account target list with a much wider column export (113 columns) --
+// verified live against the sheet's header row that the two columns this
+// logic actually needs, Account Name and Created Date, both survived the
+// rebuild under those exact (renamed from the old Salesforce API names Name/
+// CreatedDate) headers, alongside Marketing Region for the per-region account
+// count. Every other new column (Account Priority, Potential MRR, Website
+// Category, Account Owner, ...) is unused here -- this dashboard only needs
+// company-name matching, the pre-existing-account date gate, and region.
+//
 // Company matching is done on a normalized Company name against the Accounts
-// tab's Name column -- both are free-text-ish fields, so a plain trim/
+// tab's Account Name column -- both are free-text-ish fields, so a plain trim/
 // lowercase under-counts real matches. Confirmed live: a lead's
 // Company = "Aditya Birla Fashion and Retail Ltd." failed to match the real
 // Account "Aditya Birla Fashion and Retail Limited" (created 2022, genuinely
@@ -603,7 +613,7 @@ function normalizeCompanyName(name) {
   return tokens.join(' ');
 }
 
-// Company -> earliest known Account CreatedDate (if multiple Account rows
+// Company -> earliest known Account Created Date (if multiple Account rows
 // somehow share a normalized name, the earliest one is what matters for "did
 // an account already exist").
 //
@@ -619,8 +629,8 @@ function buildAccountCreatedMap(accountRows) {
   const map = new Map();
   if (accountRows.length < 2) return map;
   const h = accountRows[0];
-  const nameCol = findCol(h, 'Name');
-  const dateCol = findCol(h, 'CreatedDate');
+  const nameCol = findCol(h, 'Account Name');
+  const dateCol = findCol(h, 'Created Date');
   for (let i = 1; i < accountRows.length; i++) {
     const row = accountRows[i];
     const rawName = (row[nameCol] || '').toString();
@@ -638,20 +648,38 @@ function buildAccountCreatedMap(accountRows) {
   return map;
 }
 
-// Total size of a region's known TAL account universe (unbounded by date,
-// same as the rest of this sheet) -- feeds the funnel widget's "Total TAL
-// Accounts" top stage. Non-TAL has no equivalent concept: by definition a
-// Non-TAL company has no pre-existing Account, so there's no account count
-// to show for it.
-function countTalAccountsByRegion(accountRows, region) {
-  if (accountRows.length < 2) return 0;
+// Region's known TAL account universe (count + click-through records) --
+// feeds the funnel widget's "Total Accounts" stage, both the number and its
+// click-to-see-accounts popup. Non-TAL has no equivalent concept: by
+// definition a Non-TAL company has no matching Account on this list, so
+// there's no account count/list to show for it. Only the handful of columns
+// the Accounts popup actually displays are picked out of the sheet's 113 --
+// see the TAL/Non-TAL classification comment above for why the rest (Account
+// Owner, Website, ...) aren't needed here.
+function getTalAccountsByRegion(accountRows, region) {
+  if (accountRows.length < 2) return { count: 0, records: [] };
   const h = accountRows[0];
-  const regionCol = findCol(h, 'Marketing_Region__c');
-  let count = 0;
+  const cols = {
+    id: findCol(h, 'Account ID(18-digit)'),
+    name: findCol(h, 'Account Name'),
+    region: findCol(h, 'Marketing Region'),
+    priority: findCol(h, 'Account Priority'),
+    potentialMrr: findCol(h, 'Potential MRR'),
+    industryVertical: findCol(h, 'Main Industry Vertical'),
+  };
+  const records = [];
   for (let i = 1; i < accountRows.length; i++) {
-    if ((accountRows[i][regionCol] || '').toString().trim() === region) count++;
+    const row = accountRows[i];
+    if ((row[cols.region] || '').toString().trim() !== region) continue;
+    records.push({
+      id: (row[cols.id] || '').toString(),
+      name: (row[cols.name] || '').toString(),
+      priority: (row[cols.priority] || '').toString(),
+      potentialMrr: (row[cols.potentialMrr] || '').toString(),
+      industryVertical: (row[cols.industryVertical] || '').toString(),
+    });
   }
-  return count;
+  return { count: records.length, records };
 }
 
 // Company -> its first-ever lead CreatedDate, pooled across EVERY region's
@@ -1232,22 +1260,6 @@ export default async function handler(req, res) {
     const sheets = google.sheets({ version: 'v4', auth: client });
     const sheetId = process.env.CLG_SHEET_ID;
 
-    // Sheets that haven't been synced yet (IQL/MQL/SQL for most regions, so
-    // far) don't exist as tabs -- the Sheets API 400s on an unknown range.
-    // Treat that as "no data yet" rather than failing the whole request.
-    const getTab = async (tab) => {
-      try {
-        const r = await sheets.spreadsheets.values.get({
-          spreadsheetId: sheetId,
-          range: tab,
-          valueRenderOption: 'UNFORMATTED_VALUE',
-        });
-        return r.data.values || [];
-      } catch (err) {
-        return [];
-      }
-    };
-
     const STAGE_KEYS = ['lead', 'iql', 'mql', 'sql'];
     const jobs = [];
     for (const [region, stageSheets] of Object.entries(REGION_SHEETS)) {
@@ -1255,10 +1267,36 @@ export default async function handler(req, res) {
         jobs.push({ region, stageKey, sheetName: stageSheets[stageKey] });
       }
     }
-    const [accountsRows, ...tabData] = await Promise.all([
-      getTab(ACCOUNTS_TAB_NAME),
-      ...jobs.map(j => getTab(j.sheetName)),
-    ]);
+
+    // Fetching each tab with its own values.get() call (26 requests: Accounts
+    // + 5 regions x 4 stages) is what was making "Refreshing..." take forever
+    // -- every one of those is a separate round trip to the Sheets API, and
+    // they queue up against Google's per-user rate limit when the Leads-tab
+    // comparison feature doubles it to ~52 in-flight requests. batchGet folds
+    // them into a single HTTP call. batchGet 400s the ENTIRE request if any
+    // range names a tab that doesn't exist, though -- and IQL/MQL/SQL tabs for
+    // most regions genuinely don't exist yet (see REGION_SHEETS comment) -- so
+    // spreadsheets.get first for the real tab list, then only ask batchGet for
+    // tabs that are actually there; anything missing resolves to [] exactly
+    // like the old per-tab try/catch did.
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: sheetId, fields: 'sheets.properties.title' });
+    const existingTabs = new Set((meta.data.sheets || []).map(s => s.properties.title));
+
+    const allTabNames = [ACCOUNTS_TAB_NAME, ...jobs.map(j => j.sheetName)];
+    const rangesToFetch = allTabNames.filter(name => existingTabs.has(name));
+
+    const batch = rangesToFetch.length
+      ? await sheets.spreadsheets.values.batchGet({
+        spreadsheetId: sheetId,
+        ranges: rangesToFetch,
+        valueRenderOption: 'UNFORMATTED_VALUE',
+      })
+      : { data: { valueRanges: [] } };
+    const rowsByRange = new Map(rangesToFetch.map((name, i) => [name, batch.data.valueRanges[i].values || []]));
+    const getTabRows = (name) => rowsByRange.get(name) || [];
+
+    const accountsRows = getTabRows(ACCOUNTS_TAB_NAME);
+    const tabData = jobs.map(j => getTabRows(j.sheetName));
 
     // Built once, globally -- see buildTalVerdictMap for why this ignores the
     // requested [startTS, endTS] window entirely (the verdict comes from each
@@ -1343,7 +1381,9 @@ export default async function handler(req, res) {
 
     for (const region of Object.keys(REGION_SHEETS)) {
       if (!result[region]) result[region] = {};
-      result[region].talAccountCount = countTalAccountsByRegion(accountsRows, region);
+      const talAccounts = getTalAccountsByRegion(accountsRows, region);
+      result[region].talAccountCount = talAccounts.count;
+      result[region].talAccountRecords = talAccounts.records;
     }
 
     res.status(200).json({ startDate, endDate, regions: result, sfRecordBaseUrl: SF_RECORD_BASE_URL, lastUpdated: new Date().toISOString() });

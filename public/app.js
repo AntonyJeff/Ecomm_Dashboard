@@ -1,6 +1,30 @@
 const fmtInt = (n) => Math.round(n).toLocaleString('en-IN');
 const fmtDec = (n) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Counts a KPI number up/down from whatever it currently shows to `toValue`
+// instead of letting the text jump straight to the new figure -- reads the
+// previous value back out of the element's own text so callers don't need to
+// track it separately. formatFn must accept a plain number (fmtInt/fmtDec/
+// fmtCurrency all qualify); non-numeric previous text (e.g. the initial "-")
+// is treated as a start value of 0.
+function animateNumberText(el, toValue, formatFn = fmtInt) {
+  if (!el) return;
+  const prevNumeric = parseFloat((el.textContent || '').replace(/[^0-9.-]/g, ''));
+  const from = Number.isFinite(prevNumeric) ? prevNumeric : 0;
+  const to = Number.isFinite(toValue) ? toValue : 0;
+  if (el._numAnimFrame) cancelAnimationFrame(el._numAnimFrame);
+  if (from === to) { el.textContent = formatFn(to); return; }
+  const duration = 500;
+  const start = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = formatFn(from + (to - from) * eased);
+    el._numAnimFrame = t < 1 ? requestAnimationFrame(step) : null;
+  };
+  el._numAnimFrame = requestAnimationFrame(step);
+}
+
 // Categorical palette (fixed order, never cycled/reassigned by rank) --
 // matches the dataviz reference palette, validated for CVD-safe adjacent pairs.
 const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
@@ -27,7 +51,7 @@ function spendsRegionsForChannel() {
   return spendsIsMessaging() ? SPENDS_MESSAGING_REGIONS : SPENDS_PAID_REGIONS;
 }
 
-let activeRegion = 'India';
+let activeRegion = 'All';
 let activeStage = 'lead';
 let lastData = null;
 let viewingSpends = false;
@@ -54,26 +78,16 @@ const SPENDS_DEFAULT_END_DATE = DEFAULT_END_DATE;
 
 const METRIC_FMT = { leadAge: fmtDec, ndl: fmtInt, count: fmtInt };
 
-// Theme toggle -- dark (default) / light (Netcore orange+white). Persisted
-// per-browser via localStorage; falls back to dark on first visit rather
-// than following the OS preference, matching the earlier decision that this
-// dashboard's chrome shouldn't silently flip on the viewer's system setting.
+// Theme toggle -- light (default) / dark. Persisted per-browser via
+// localStorage; falls back to light on first visit. There is no visible
+// toggle control -- clicking the "Live" badge in the topbar switches themes.
 const THEME_STORAGE_KEY = 'clg-dashboard-theme';
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
-  const icon = document.getElementById('themeToggleIcon');
-  const label = document.getElementById('themeToggleLabel');
-  if (theme === 'light') {
-    if (icon) icon.textContent = '\u{1F319}'; // moon -- click to go dark
-    if (label) label.textContent = 'Dark';
-  } else {
-    if (icon) icon.textContent = '\u{2600}\u{FE0F}'; // sun -- click to go light
-    if (label) label.textContent = 'Light';
-  }
 }
 function initTheme() {
   const saved = localStorage.getItem(THEME_STORAGE_KEY);
-  applyTheme(saved === 'light' ? 'light' : 'dark');
+  applyTheme(saved === 'dark' ? 'dark' : 'light');
   const btn = document.getElementById('themeToggle');
   if (btn) {
     btn.addEventListener('click', () => {
@@ -183,7 +197,7 @@ function renderPivotHead(statusColumns, outerLabel, innerLabel) {
 // same underlying cell, so a cell with leads but zero NDL-flagged ones would
 // otherwise show a clickable "0" on the NDL row, which reads as a bug (the
 // number shown implies nothing to see, but the click would show leads anyway).
-function metricRow({ quarterCell, subSourceCell, metric, cells, statusColumns, extraClass = '', revealColumns = null }) {
+function metricRow({ quarterCell, subSourceCell, metric, cells, statusColumns, extraClass = '', revealColumns = null, prevCells = null }) {
   const fmt = METRIC_FMT[metric.key];
   // revealColumns is a WIP staging flag (Leads-tab crosstab columns are being
   // rebuilt one at a time) -- null means "show everything" (IQL/MQL tabs,
@@ -197,12 +211,14 @@ function metricRow({ quarterCell, subSourceCell, metric, cells, statusColumns, e
       <td class="pin pin-metric${metric.bold ? ' pivot-cell-count' : ''}">${metric.label}</td>
       ${cells.map((cell, i) => {
         const col = statusColumns && statusColumns[i];
+        const prevCell = prevCells && prevCells[i];
         // The MRR pseudo-column (Leads tab only) is a dollar amount, not a
         // lead count -- it only shows on the bold Leads row, formatted as
         // currency, and is never clickable (no per-lead breakdown for it).
         if (col && col.isMrr) {
           const val = metric.bold ? fmtCurrency(isRevealed(col) ? (cell.mrr || 0) : 0) : '';
-          return `<td class="pivot-cell${metric.bold ? ' pivot-cell-count' : ''} pivot-cell-mrr">${val}</td>`;
+          const delta = metric.bold && isRevealed(col) && prevCell ? deltaBadgeHtml(cell.mrr || 0, prevCell.mrr) : '';
+          return `<td class="pivot-cell${metric.bold ? ' pivot-cell-count' : ''} pivot-cell-mrr">${val}${delta}</td>`;
         }
         const clickable = metric.bold && cell.records && cell.records.length > 0;
         const cls = `pivot-cell${metric.bold ? ' pivot-cell-count' : ''}${clickable ? ' pivot-cell-clickable' : ''}`;
@@ -210,15 +226,52 @@ function metricRow({ quarterCell, subSourceCell, metric, cells, statusColumns, e
         const dataAttrs = clickable
           ? ` data-records="${encodeURIComponent(JSON.stringify(cell.records))}" data-status-label="${escapeHtml(statusLabel)}"`
           : '';
-        return `<td class="${cls}"${dataAttrs}>${isRevealed(col) ? fmt(cell[metric.key]) : fmt(0)}</td>`;
+        const delta = isRevealed(col) && prevCell ? deltaBadgeHtml(cell[metric.key], prevCell[metric.key]) : '';
+        return `<td class="${cls}"${dataAttrs}>${isRevealed(col) ? fmt(cell[metric.key]) : fmt(0)}${delta}</td>`;
       }).join('')}
     </tr>
   `;
 }
 
-function renderPivotBody(pivot, revealColumns = null) {
+// Aggregates a comparison-period pivot's cells by row dimension (subSource)
+// only, ignoring its own quarter grouping, into an array of cells index-
+// aligned to statusColumns -- safe here specifically because the Leads
+// stage's statusColumns come from a fixed order (stageCfg.statusGroups, see
+// api/clg-regions.js) rather than being data-driven, so the current and
+// comparison pivots always share the same column set/order even though their
+// row sets (which quarter/subSource combos have any data) can differ. Ignoring
+// quarter also means a comparison range that lands in an earlier fiscal
+// quarter than the primary range still matches up correctly by subSource.
+function aggregatePivotBySubSource(pivot) {
+  const map = new Map();
+  if (!pivot) return map;
+  for (const row of pivot.rows) {
+    if (!map.has(row.subSource)) {
+      map.set(row.subSource, row.cells.map(() => ({ leadAge: 0, ndl: 0, count: 0, mrr: 0 })));
+    }
+    const agg = map.get(row.subSource);
+    row.cells.forEach((cell, i) => {
+      if (!agg[i]) agg[i] = { leadAge: 0, ndl: 0, count: 0, mrr: 0 };
+      agg[i].leadAge += cell.leadAge || 0;
+      agg[i].ndl += cell.ndl || 0;
+      agg[i].count += cell.count || 0;
+      agg[i].mrr += cell.mrr || 0;
+    });
+  }
+  return map;
+}
+
+function renderPivotBody(pivot, revealColumns = null, prevPivot = null) {
   if (!pivot.rows.length) return '<tr><td colspan="99" class="empty">No matching leads in this range.</td></tr>';
   const metrics = pivot.metrics;
+  const prevBySubSource = prevPivot ? aggregatePivotBySubSource(prevPivot) : null;
+  // A subSource entirely absent from the comparison period (e.g. WhatsApp had
+  // zero leads last week) is a real, meaningful zero -- not "no comparison
+  // data available." Falling back to null here would silently suppress every
+  // delta badge on that row (including ones with real current-period numbers,
+  // like Total Leads/Disqualified Lead), when the correct badge is "NEW"
+  // (deltaBadgeHtml already renders that for an actual 0 previous value).
+  const zeroCells = () => pivot.statusColumns.map(() => ({ leadAge: 0, ndl: 0, count: 0, mrr: 0 }));
 
   const quarterRowCounts = new Map();
   pivot.rows.forEach(r => quarterRowCounts.set(r.quarter, (quarterRowCounts.get(r.quarter) || 0) + metrics.length));
@@ -227,6 +280,7 @@ function renderPivotBody(pivot, revealColumns = null) {
   return pivot.rows.map(row => {
     const isFirstOfQuarter = !seenQuarter.has(row.quarter);
     seenQuarter.add(row.quarter);
+    const prevCells = prevBySubSource ? (prevBySubSource.get(row.subSource) || zeroCells()) : null;
 
     return metrics.map((metric, i) => {
       const quarterCell = isFirstOfQuarter && i === 0
@@ -235,17 +289,17 @@ function renderPivotBody(pivot, revealColumns = null) {
       const subSourceCell = i === 0
         ? `<td class="pin pin-subsource" rowspan="${metrics.length}" title="${escapeHtml(row.subSource)}">${escapeHtml(row.subSource)}</td>`
         : '';
-      return metricRow({ quarterCell, subSourceCell, metric, cells: row.cells, statusColumns: pivot.statusColumns, revealColumns });
+      return metricRow({ quarterCell, subSourceCell, metric, cells: row.cells, statusColumns: pivot.statusColumns, revealColumns, prevCells });
     }).join('');
   }).join('');
 }
 
-function renderPivotFoot(pivot, revealColumns = null) {
+function renderPivotFoot(pivot, revealColumns = null, prevPivot = null) {
   const metrics = pivot.metrics;
   return metrics.map((metric, i) => {
     const quarterCell = i === 0 ? `<td class="pin pin-quarter" rowspan="${metrics.length}">Total</td>` : '';
     const subSourceCell = i === 0 ? `<td class="pin pin-subsource" rowspan="${metrics.length}"></td>` : '';
-    return metricRow({ quarterCell, subSourceCell, metric, cells: pivot.columnTotals, statusColumns: pivot.statusColumns, extraClass: 'pivot-total-row', revealColumns });
+    return metricRow({ quarterCell, subSourceCell, metric, cells: pivot.columnTotals, statusColumns: pivot.statusColumns, extraClass: 'pivot-total-row', revealColumns, prevCells: prevPivot ? prevPivot.columnTotals : null });
   }).join('');
 }
 
@@ -253,7 +307,7 @@ function renderPivotFoot(pivot, revealColumns = null) {
 // SQL live under the Trends tab instead) -- table only, no KPI tiles (an
 // exact duplicate of the top overview bento boxes) and no chart (moved to
 // Trends alongside IQL/MQL/SQL's charts).
-function renderRegion(region, stage, data) {
+function renderRegion(region, stage, data, prevPivot = null) {
   const template = document.getElementById('region-template');
   const node = template.content.cloneNode(true);
 
@@ -270,8 +324,8 @@ function renderRegion(region, stage, data) {
     ? new Set(['Total Leads', 'Meeting booked (IQL)', 'Meeting Executed (MQL)', 'Converted (SQL)', 'MRR', 'Disqualified Lead'])
     : null;
   node.querySelector('.pivot-table thead').innerHTML = renderPivotHead(data.pivot.statusColumns, data.pivot.outerLabel, data.pivot.innerLabel);
-  node.querySelector('.pivot-table tbody').innerHTML = renderPivotBody(data.pivot, revealColumns);
-  node.querySelector('.pivot-table tfoot').innerHTML = data.pivot.rows.length ? renderPivotFoot(data.pivot, revealColumns) : '';
+  node.querySelector('.pivot-table tbody').innerHTML = renderPivotBody(data.pivot, revealColumns, prevPivot);
+  node.querySelector('.pivot-table tfoot').innerHTML = data.pivot.rows.length ? renderPivotFoot(data.pivot, revealColumns, prevPivot) : '';
 
   return node;
 }
@@ -456,25 +510,44 @@ function render() {
     return;
   }
   const data = lastData.regions[activeRegion][activeStage];
-  app.appendChild(renderRegion(activeRegion, activeStage, data));
+  const prevRegionData = leadsPrevData && leadsPrevData.regions[activeRegion];
+  const prevPivot = prevRegionData && prevRegionData[activeStage] ? prevRegionData[activeStage].pivot : null;
+  app.appendChild(renderRegion(activeRegion, activeStage, data, prevPivot));
   animateViewIn(app);
+}
+
+// Reads totalRecords/totalNDL off any /api/clg-regions-shaped payload (the
+// live lastData or a comparison-range leadsPrevData) for the given regions --
+// shared by renderOverview's current and comparison figures.
+function sumLeadTotals(data, regionsToSum) {
+  let totalRecords = 0, totalNDL = 0;
+  if (!data) return { totalRecords, totalNDL };
+  for (const region of regionsToSum) {
+    const lead = data.regions[region] && data.regions[region].lead;
+    if (!lead) continue;
+    totalRecords += lead.totalRecords;
+    totalNDL += lead.totalNDL;
+  }
+  return { totalRecords, totalNDL };
 }
 
 // ---- Overview boxes: Leads / Total NDL / Leads+NDL, for the active region or
 // summed across all 4 when "All Regions" is selected -- always read off the
-// Leads-stage totals regardless of which stage tab is currently open. ----
+// Leads-stage totals regardless of which stage tab is currently open. Shows a
+// delta badge against leadsPrevData (the currently active date-range
+// comparison, if any -- see the "Compare" controls below). ----
 function renderOverview() {
   if (!lastData) return;
   const regionsToSum = activeRegion === 'All' ? REGIONS.map(r => r.key) : [activeRegion];
-  let totalRecords = 0, totalNDL = 0;
-  for (const region of regionsToSum) {
-    const lead = lastData.regions[region].lead;
-    totalRecords += lead.totalRecords;
-    totalNDL += lead.totalNDL;
-  }
-  document.getElementById('overviewLeads').textContent = fmtInt(totalRecords);
-  document.getElementById('overviewNdl').textContent = fmtInt(totalNDL);
-  document.getElementById('overviewSum').textContent = fmtInt(totalRecords + totalNDL);
+  const { totalRecords, totalNDL } = sumLeadTotals(lastData, regionsToSum);
+  const prev = leadsPrevData ? sumLeadTotals(leadsPrevData, regionsToSum) : null;
+
+  animateNumberText(document.getElementById('overviewLeads'), totalRecords);
+  animateNumberText(document.getElementById('overviewNdl'), totalNDL);
+  animateNumberText(document.getElementById('overviewSum'), totalRecords + totalNDL);
+  setKpiDelta('overviewLeadsDelta', totalRecords, prev ? prev.totalRecords : null);
+  setKpiDelta('overviewNdlDelta', totalNDL, prev ? prev.totalNDL : null);
+  setKpiDelta('overviewSumDelta', totalRecords + totalNDL, prev ? prev.totalRecords + prev.totalNDL : null);
 }
 
 // ---- Campaigns tile: a live LinkedIn/Meta spend summary for the same
@@ -499,9 +572,9 @@ function renderOverviewSpends() {
     linkedinSpend += regionData.linkedin.kpi.spend;
     metaSpend += regionData.meta.kpi.spend;
   }
-  linkedinEl.textContent = fmtCurrency(linkedinSpend);
-  metaEl.textContent = fmtCurrency(metaSpend);
-  totalEl.textContent = fmtCurrency(linkedinSpend + metaSpend);
+  animateNumberText(linkedinEl, linkedinSpend, fmtCurrency);
+  animateNumberText(metaEl, metaSpend, fmtCurrency);
+  animateNumberText(totalEl, linkedinSpend + metaSpend, fmtCurrency);
 }
 
 // ---- Region filter: a compact dropdown in the topbar (replaces the old
@@ -530,46 +603,56 @@ function radarToXY(deg, r) {
   return [RADAR_CX + r * Math.cos(rad), RADAR_CY + r * Math.sin(rad)];
 }
 
+// Reads TAL/Non-TAL lead counts (+ account count) off any /api/clg-regions-
+// shaped payload for the given regions -- shared by renderTalWidget's current
+// and comparison figures. Records are only collected for `data === lastData`
+// callers (the comparison payload never needs a click-through list).
+function sumTalLeadCounts(data, regionsToSum, { withRecords = false } = {}) {
+  let talCount = 0, nonTalCount = 0, talRecords = [], nonTalRecords = [], accountCount = 0, accountRecords = [];
+  if (data) {
+    for (const region of regionsToSum) {
+      const regionData = data.regions[region];
+      if (!regionData) continue;
+      accountCount += regionData.talAccountCount || 0;
+      if (withRecords) accountRecords = accountRecords.concat(regionData.talAccountRecords || []);
+      const tal = regionData.lead && regionData.lead.tal;
+      if (!tal) continue;
+      talCount += tal.talCount;
+      nonTalCount += tal.nonTalCount;
+      if (withRecords) {
+        talRecords = talRecords.concat(tal.talRecords);
+        nonTalRecords = nonTalRecords.concat(tal.nonTalRecords);
+      }
+    }
+  }
+  return { talCount, nonTalCount, talRecords, nonTalRecords, accountCount, accountRecords };
+}
+
 // TAL/Non-TAL widget -- replaces the old Live Lead Radar. Each company's
 // verdict is decided once (server-side, from that company's first-ever lead
 // touch) and never re-evaluated per lead -- see api/clg-regions.js's
 // buildTalVerdictMap. What DOES follow the dashboard's selected date range
 // and region here is simply which leads get counted/listed under each
-// verdict, exactly like every other Leads-tab number.
+// verdict, exactly like every other Leads-tab number. Shows a delta badge
+// against leadsPrevData when a date-range comparison is active.
 function renderTalWidget() {
   const regionsToSum = activeRegion === 'All' ? REGIONS.map(r => r.key) : [activeRegion];
-  let talCount = 0, nonTalCount = 0, talRecords = [], nonTalRecords = [], accountCount = 0;
-  if (lastData) {
-    for (const region of regionsToSum) {
-      const regionData = lastData.regions[region];
-      if (!regionData) continue;
-      accountCount += regionData.talAccountCount || 0;
-      const tal = regionData.lead && regionData.lead.tal;
-      if (!tal) continue;
-      talCount += tal.talCount;
-      nonTalCount += tal.nonTalCount;
-      talRecords = talRecords.concat(tal.talRecords);
-      nonTalRecords = nonTalRecords.concat(tal.nonTalRecords);
-    }
-  }
+  const { talCount, nonTalCount, talRecords, nonTalRecords, accountCount, accountRecords } = sumTalLeadCounts(lastData, regionsToSum, { withRecords: true });
+  const prev = leadsPrevData ? sumTalLeadCounts(leadsPrevData, regionsToSum) : null;
   const total = talCount + nonTalCount;
   const talPct = total > 0 ? (talCount / total) * 100 : 0;
-  const nonTalPct = total > 0 ? (nonTalCount / total) * 100 : 0;
 
-  document.getElementById('talCount').textContent = fmtInt(talCount);
-  document.getElementById('nonTalCount').textContent = fmtInt(nonTalCount);
-  document.getElementById('talPct').textContent = total ? `${fmtDec(talPct)}% of leads` : '—';
-  document.getElementById('nonTalPct').textContent = total ? `${fmtDec(nonTalPct)}% of leads` : '—';
   document.getElementById('talWindow').textContent = `▶ SCAN WINDOW: ${currentStartDate} → ${currentEndDate}`;
   document.getElementById('talWidgetBarTal').style.width = `${total ? talPct : 50}%`;
-  document.getElementById('talFunnelAccountsTal').textContent = fmtInt(accountCount);
 
-  const talCard = document.getElementById('talCountCard');
-  const nonTalCard = document.getElementById('nonTalCountCard');
-  talCard.dataset.records = encodeURIComponent(JSON.stringify(talRecords));
-  talCard.dataset.statusLabel = 'TAL Leads';
-  nonTalCard.dataset.records = encodeURIComponent(JSON.stringify(nonTalRecords));
-  nonTalCard.dataset.statusLabel = 'Non-TAL Leads';
+  const accountsCell = document.getElementById('talFunnelAccountsTal');
+  animateNumberText(accountsCell.querySelector('.tal-funnel-val-num') || accountsCell, accountCount);
+  accountsCell.dataset.records = encodeURIComponent(JSON.stringify(accountRecords));
+  accountsCell.dataset.statusLabel = 'TAL Accounts';
+  accountsCell.dataset.recordKind = 'account';
+
+  renderTalFunnelCell('talFunnelLeadsTal', talCount, talRecords, 'TAL Leads', prev ? prev.talCount : null);
+  renderTalFunnelCell('talFunnelLeadsNonTal', nonTalCount, nonTalRecords, 'Non-TAL Leads', prev ? prev.nonTalCount : null);
 
   renderTalFunnelTable(regionsToSum);
 }
@@ -580,62 +663,62 @@ function renderTalWidget() {
 // reuses SQL's own .tal object (talMrr/nonTalMrr are dollar sums over the
 // exact same deduped-by-Opportunity rows SQL's opportunity count comes from)
 // rather than being a separate stage.
-function renderTalFunnelCell(elId, count, records, label) {
-  const el = document.getElementById(elId);
-  if (!el) return;
-  el.textContent = fmtInt(count);
-  el.dataset.records = encodeURIComponent(JSON.stringify(records));
-  el.dataset.statusLabel = label;
-}
-
-function renderTalFunnelTable(regionsToSum) {
+function sumTalFunnelStages(data, regionsToSum, { withRecords = false } = {}) {
   const sums = {
     iql: { tal: 0, nonTal: 0, talRecords: [], nonTalRecords: [] },
     mql: { tal: 0, nonTal: 0, talRecords: [], nonTalRecords: [] },
     sql: { tal: 0, nonTal: 0, talRecords: [], nonTalRecords: [] },
     mrr: { tal: 0, nonTal: 0, talRecords: [], nonTalRecords: [] },
   };
-  if (lastData) {
-    for (const region of regionsToSum) {
-      const regionData = lastData.regions[region];
-      if (!regionData) continue;
-      for (const stage of ['iql', 'mql', 'sql']) {
-        const tal = regionData[stage] && regionData[stage].tal;
-        if (!tal) continue;
-        sums[stage].tal += tal.talCount;
-        sums[stage].nonTal += tal.nonTalCount;
+  if (!data) return sums;
+  for (const region of regionsToSum) {
+    const regionData = data.regions[region];
+    if (!regionData) continue;
+    for (const stage of ['iql', 'mql', 'sql']) {
+      const tal = regionData[stage] && regionData[stage].tal;
+      if (!tal) continue;
+      sums[stage].tal += tal.talCount;
+      sums[stage].nonTal += tal.nonTalCount;
+      if (withRecords) {
         sums[stage].talRecords = sums[stage].talRecords.concat(tal.talRecords);
         sums[stage].nonTalRecords = sums[stage].nonTalRecords.concat(tal.nonTalRecords);
       }
-      const sqlTal = regionData.sql && regionData.sql.tal;
-      if (sqlTal && sqlTal.talMrr !== undefined) {
-        sums.mrr.tal += sqlTal.talMrr;
-        sums.mrr.nonTal += sqlTal.nonTalMrr;
+    }
+    const sqlTal = regionData.sql && regionData.sql.tal;
+    if (sqlTal && sqlTal.talMrr !== undefined) {
+      sums.mrr.tal += sqlTal.talMrr;
+      sums.mrr.nonTal += sqlTal.nonTalMrr;
+      if (withRecords) {
         sums.mrr.talRecords = sums.mrr.talRecords.concat(sqlTal.talRecords);
         sums.mrr.nonTalRecords = sums.mrr.nonTalRecords.concat(sqlTal.nonTalRecords);
       }
     }
   }
+  return sums;
+}
 
-  renderTalFunnelCell('talFunnelIqlTal', sums.iql.tal, sums.iql.talRecords, 'TAL IQL');
-  renderTalFunnelCell('talFunnelIqlNonTal', sums.iql.nonTal, sums.iql.nonTalRecords, 'Non-TAL IQL');
-  renderTalFunnelCell('talFunnelMqlTal', sums.mql.tal, sums.mql.talRecords, 'TAL MQL');
-  renderTalFunnelCell('talFunnelMqlNonTal', sums.mql.nonTal, sums.mql.nonTalRecords, 'Non-TAL MQL');
-  renderTalFunnelCell('talFunnelSqlTal', sums.sql.tal, sums.sql.talRecords, 'TAL SQL');
-  renderTalFunnelCell('talFunnelSqlNonTal', sums.sql.nonTal, sums.sql.nonTalRecords, 'Non-TAL SQL');
+function renderTalFunnelCell(elId, count, records, label, prevCount, formatFn = fmtInt) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  animateNumberText(el.querySelector('.tal-funnel-val-num') || el, count, formatFn);
+  el.dataset.records = encodeURIComponent(JSON.stringify(records));
+  el.dataset.statusLabel = label;
+  setKpiDelta(`${elId}Delta`, count, prevCount);
+}
 
-  const mrrTalEl = document.getElementById('talFunnelMrrTal');
-  const mrrNonTalEl = document.getElementById('talFunnelMrrNonTal');
-  if (mrrTalEl) {
-    mrrTalEl.textContent = fmtCurrency(sums.mrr.tal);
-    mrrTalEl.dataset.records = encodeURIComponent(JSON.stringify(sums.mrr.talRecords));
-    mrrTalEl.dataset.statusLabel = 'TAL MRR';
-  }
-  if (mrrNonTalEl) {
-    mrrNonTalEl.textContent = fmtCurrency(sums.mrr.nonTal);
-    mrrNonTalEl.dataset.records = encodeURIComponent(JSON.stringify(sums.mrr.nonTalRecords));
-    mrrNonTalEl.dataset.statusLabel = 'Non-TAL MRR';
-  }
+function renderTalFunnelTable(regionsToSum) {
+  const sums = sumTalFunnelStages(lastData, regionsToSum, { withRecords: true });
+  const prevSums = leadsPrevData ? sumTalFunnelStages(leadsPrevData, regionsToSum) : null;
+  const prev = (stage, side) => prevSums ? prevSums[stage][side] : null;
+
+  renderTalFunnelCell('talFunnelIqlTal', sums.iql.tal, sums.iql.talRecords, 'TAL IQL', prev('iql', 'tal'));
+  renderTalFunnelCell('talFunnelIqlNonTal', sums.iql.nonTal, sums.iql.nonTalRecords, 'Non-TAL IQL', prev('iql', 'nonTal'));
+  renderTalFunnelCell('talFunnelMqlTal', sums.mql.tal, sums.mql.talRecords, 'TAL MQL', prev('mql', 'tal'));
+  renderTalFunnelCell('talFunnelMqlNonTal', sums.mql.nonTal, sums.mql.nonTalRecords, 'Non-TAL MQL', prev('mql', 'nonTal'));
+  renderTalFunnelCell('talFunnelSqlTal', sums.sql.tal, sums.sql.talRecords, 'TAL SQL', prev('sql', 'tal'));
+  renderTalFunnelCell('talFunnelSqlNonTal', sums.sql.nonTal, sums.sql.nonTalRecords, 'Non-TAL SQL', prev('sql', 'nonTal'));
+  renderTalFunnelCell('talFunnelMrrTal', sums.mrr.tal, sums.mrr.talRecords, 'TAL MRR', prev('mrr', 'tal'), fmtCurrency);
+  renderTalFunnelCell('talFunnelMrrNonTal', sums.mrr.nonTal, sums.mrr.nonTalRecords, 'Non-TAL MRR', prev('mrr', 'nonTal'), fmtCurrency);
 }
 
 // ---- Date-range control: an always-visible calendar card (not a dropdown),
@@ -862,6 +945,321 @@ function applyDatePreset(preset) {
   closeAllDatePopovers();
 }
 
+// ---- Leads tab date-range comparison -- mirrors the Spends tab's "Compare"
+// controls exactly (same 'auto' previous-N-days / 'custom' hand-picked-range
+// modes, same two-click calendar), but against /api/clg-regions instead of
+// /api/clg-spends, and independent state -- comparing the Leads tab's range
+// has nothing to do with whatever comparison (if any) is active on Spends.
+// leadsPrevData feeds the delta badges on the overview tiles and the
+// TAL/Non-TAL widget's Lead/IQL/MQL/SQL/MRR figures. ----
+let leadsComparePeriod = null;
+let leadsCompareMode = null; // null | 'auto' | 'custom'
+let leadsPrevData = null;
+let leadsCustomCompareStart = null;
+let leadsCustomCompareEnd = null;
+
+function leadsUpdateCompareToggle() {
+  leadsComparePeriod = detectComparePeriod(currentStartDate, currentEndDate);
+  const btn = document.getElementById('leadsCompareToggle');
+  const closeBtn = document.getElementById('leadsCompareClose');
+  const customBtn = document.getElementById('leadsCompareCustomBtn');
+
+  if (!leadsComparePeriod) {
+    btn.classList.add('hidden');
+    if (leadsCompareMode === 'auto') { leadsCompareMode = null; leadsPrevData = null; }
+  } else {
+    btn.textContent = `Compare with previous ${leadsComparePeriod.label}`;
+    btn.classList.remove('hidden');
+    btn.classList.toggle('active', leadsCompareMode === 'auto');
+  }
+
+  customBtn.classList.toggle('active', leadsCompareMode === 'custom');
+  document.getElementById('leadsCompareCustomLabel').textContent = leadsCompareMode === 'custom'
+    ? `Comparing vs ${RANGE_DATE_FMT.format(new Date(leadsCustomCompareStart + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(leadsCustomCompareEnd + 'T00:00:00Z'))}`
+    : 'Compare with custom range';
+
+  closeBtn.classList.toggle('hidden', !leadsCompareMode);
+}
+
+// Only 'auto' mode needs a refetch when the primary range changes -- 'custom'
+// mode's comparison range is fixed by the user, independent of the primary
+// range. Called from load() so every primary-range change keeps it in sync.
+async function leadsFetchPrevIfNeeded() {
+  if (leadsCompareMode !== 'auto' || !leadsComparePeriod) return;
+  const prevEnd = addDaysToDateStr(currentStartDate, -1);
+  const prevStart = addDaysToDateStr(prevEnd, -(leadsComparePeriod.days - 1));
+  try {
+    const res = await fetch(`/api/clg-regions?startDate=${prevStart}&endDate=${prevEnd}`);
+    const data = await res.json();
+    leadsPrevData = res.ok ? data : null;
+  } catch (err) {
+    leadsPrevData = null;
+  }
+}
+
+function leadsDisableCompare() {
+  leadsCompareMode = null;
+  leadsPrevData = null;
+  leadsCustomCompareStart = null;
+  leadsCustomCompareEnd = null;
+  document.getElementById('leadsCompareToggle').classList.remove('active');
+  document.getElementById('leadsCompareCustomBtn').classList.remove('active');
+  document.getElementById('leadsCompareCustomLabel').textContent = 'Compare with custom range';
+  document.getElementById('leadsCompareClose').classList.add('hidden');
+  renderOverview();
+  renderTalWidget();
+  // Without this, the Funnel View pivot table (render() is what rebuilds it)
+  // kept showing its last-drawn delta badges after Compare was turned off --
+  // stale comparison numbers left on screen looking like a still-active
+  // comparison, not just a missed refresh.
+  render();
+}
+
+document.getElementById('leadsCompareToggle').addEventListener('click', async (e) => {
+  if (leadsCompareMode === 'auto') {
+    leadsDisableCompare();
+    return;
+  }
+  leadsCompareMode = 'auto';
+  document.getElementById('leadsCompareToggle').classList.add('active');
+  document.getElementById('leadsCompareCustomBtn').classList.remove('active');
+  document.getElementById('leadsCompareCustomLabel').textContent = 'Compare with custom range';
+  document.getElementById('leadsCompareClose').classList.remove('hidden');
+  renderLeadsCompareCalendar();
+  pulseScale(e.currentTarget);
+  const status = document.getElementById('status');
+  status.textContent = 'Loading comparison...';
+  await leadsFetchPrevIfNeeded();
+  status.textContent = '';
+  renderOverview();
+  renderTalWidget();
+  render();
+});
+
+document.getElementById('leadsCompareClose').addEventListener('click', (e) => {
+  e.stopPropagation();
+  leadsDisableCompare();
+});
+
+// Custom comparison range -- same two-month single-view calendar and
+// mandatory two-click (start, then end) selection as the primary date
+// pickers, letting the user compare the selected primary range against ANY
+// hand-picked window.
+let leadsComparePendingRangeStart = null;
+let leadsCompareDraftStartDate = null;
+let leadsCompareDraftEndDate = null;
+let leadsCompareCalendarViewDateLeft = monthStartUTC(currentEndDate, -1);
+let leadsCompareCalendarViewDateRight = monthStartUTC(currentEndDate, 0);
+
+function renderLeadsCompareCalendarHeader() {
+  const hasDraft = leadsCompareDraftStartDate && leadsCompareDraftEndDate;
+  const hasSelection = leadsCompareMode === 'custom' && leadsCustomCompareStart && leadsCustomCompareEnd;
+  const rangePill = document.getElementById('compareCalendarRangePillLeads');
+  if (hasDraft) {
+    rangePill.textContent = leadsCompareDraftStartDate === leadsCompareDraftEndDate
+      ? DATE_LABEL_FMT.format(new Date(leadsCompareDraftEndDate + 'T00:00:00Z'))
+      : `${RANGE_DATE_FMT.format(new Date(leadsCompareDraftStartDate + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(leadsCompareDraftEndDate + 'T00:00:00Z'))}`;
+    rangePill.classList.remove('hidden');
+  } else if (leadsComparePendingRangeStart) {
+    rangePill.textContent = `From ${RANGE_DATE_FMT.format(new Date(leadsComparePendingRangeStart + 'T00:00:00Z'))} — pick end date`;
+    rangePill.classList.remove('hidden');
+  } else if (hasSelection) {
+    rangePill.textContent = leadsCustomCompareStart === leadsCustomCompareEnd
+      ? DATE_LABEL_FMT.format(new Date(leadsCustomCompareEnd + 'T00:00:00Z'))
+      : `${RANGE_DATE_FMT.format(new Date(leadsCustomCompareStart + 'T00:00:00Z'))} – ${RANGE_DATE_FMT.format(new Date(leadsCustomCompareEnd + 'T00:00:00Z'))}`;
+    rangePill.classList.remove('hidden');
+  } else {
+    rangePill.classList.add('hidden');
+  }
+  document.getElementById('compareCalendarResetBtnLeads').classList.toggle('hidden', !(leadsComparePendingRangeStart || hasSelection));
+  document.getElementById('compareCalendarHelperTextLeads').classList.toggle('hidden', !!leadsComparePendingRangeStart || !!hasDraft);
+  document.getElementById('compareCalendarApplyRowLeads').classList.toggle('hidden', !hasDraft);
+}
+
+function leadsCompareUpdateQuickRangeActive() {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  document.querySelectorAll('#compareQuickRangeRowLeads .quick-range-btn').forEach(btn => {
+    const expectedStart = btn.dataset.preset
+      ? (btn.dataset.preset === 'fy' ? fiscalYearStartDate() : quarterStartDate())
+      : addDaysToDateStr(todayStr, -(parseInt(btn.dataset.days, 10) - 1));
+    const isActive = leadsCompareMode === 'custom' && leadsCustomCompareEnd === todayStr && leadsCustomCompareStart === expectedStart;
+    btn.classList.toggle('active', isActive);
+  });
+}
+
+function renderLeadsCompareCalendarMonthGrid(viewDate, gridId) {
+  const year = viewDate.getUTCFullYear();
+  const month = viewDate.getUTCMonth();
+  const firstOfMonth = new Date(Date.UTC(year, month, 1));
+  const leadingBlanks = (firstOfMonth.getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const hasDraft = leadsCompareDraftStartDate && leadsCompareDraftEndDate;
+  const hasAppliedSelection = leadsCompareMode === 'custom' && leadsCustomCompareStart && leadsCustomCompareEnd;
+  const displayStart = hasDraft ? leadsCompareDraftStartDate : leadsCustomCompareStart;
+  const displayEnd = hasDraft ? leadsCompareDraftEndDate : leadsCustomCompareEnd;
+  const hasSelection = hasDraft || hasAppliedSelection;
+  const cells = [];
+  for (let i = 0; i < leadingBlanks; i++) cells.push('<span class="calendar-day calendar-day-blank"></span>');
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const isFuture = dateStr > todayStr;
+    const isToday = dateStr === todayStr;
+    const isPending = leadsComparePendingRangeStart === dateStr;
+    const isEdge = hasSelection && !leadsComparePendingRangeStart && (dateStr === displayStart || dateStr === displayEnd);
+    const isBetween = hasSelection && !leadsComparePendingRangeStart && dateStr > displayStart && dateStr < displayEnd;
+    const classes = ['calendar-day'];
+    if (isFuture) classes.push('calendar-day-future');
+    else if (isPending) classes.push('calendar-day-pending');
+    else if (isEdge) classes.push('calendar-day-selected');
+    else if (isBetween) classes.push('calendar-day-in-range');
+    else if (isToday) classes.push('calendar-day-today');
+    const attrs = isFuture ? 'disabled' : `data-date="${dateStr}"`;
+    const dot = isToday && !isPending && !isEdge ? '<span class="calendar-day-dot"></span>' : '';
+    cells.push(`<button type="button" class="${classes.join(' ')}" ${attrs}>${day}${dot}</button>`);
+  }
+  document.getElementById(gridId).innerHTML = cells.join('');
+}
+
+function renderLeadsCompareCalendar() {
+  renderLeadsCompareCalendarHeader();
+  leadsCompareUpdateQuickRangeActive();
+  document.getElementById('compareCalendarMonthLabelLeftLeads').textContent = CALENDAR_MONTH_FMT.format(leadsCompareCalendarViewDateLeft).toUpperCase();
+  document.getElementById('compareCalendarMonthLabelRightLeads').textContent = CALENDAR_MONTH_FMT.format(leadsCompareCalendarViewDateRight).toUpperCase();
+  renderLeadsCompareCalendarMonthGrid(leadsCompareCalendarViewDateLeft, 'compareCalendarGridLeftLeads');
+  renderLeadsCompareCalendarMonthGrid(leadsCompareCalendarViewDateRight, 'compareCalendarGridRightLeads');
+}
+
+async function applyLeadsCustomCompareRange(start, end) {
+  leadsCustomCompareStart = start;
+  leadsCustomCompareEnd = end;
+  leadsCompareMode = 'custom';
+  leadsCompareCalendarViewDateLeft = monthStartUTC(end, -1);
+  leadsCompareCalendarViewDateRight = monthStartUTC(end, 0);
+  renderLeadsCompareCalendar();
+  document.getElementById('leadsCompareToggle').classList.remove('active');
+
+  const status = document.getElementById('status');
+  status.textContent = 'Loading comparison...';
+  try {
+    const res = await fetch(`/api/clg-regions?startDate=${start}&endDate=${end}`);
+    const data = await res.json();
+    leadsPrevData = res.ok ? data : null;
+  } catch (err) {
+    leadsPrevData = null;
+  }
+  status.textContent = '';
+  leadsUpdateCompareToggle();
+  document.getElementById('leadsCompareClose').classList.remove('hidden');
+  renderOverview();
+  renderTalWidget();
+  render();
+  closeAllDatePopovers();
+}
+
+function handleLeadsCompareDayClick(dateStr) {
+  if (!leadsComparePendingRangeStart) {
+    leadsComparePendingRangeStart = dateStr;
+    renderLeadsCompareCalendar();
+    return;
+  }
+  leadsCompareDraftStartDate = leadsComparePendingRangeStart < dateStr ? leadsComparePendingRangeStart : dateStr;
+  leadsCompareDraftEndDate = leadsComparePendingRangeStart < dateStr ? dateStr : leadsComparePendingRangeStart;
+  leadsComparePendingRangeStart = null;
+  renderLeadsCompareCalendar();
+  pulseScale(document.querySelector('#compareCalendarTwoMonthsLeads .calendar-day-selected'));
+}
+
+function leadsCompareCommitRange() {
+  if (leadsCompareDraftStartDate && leadsCompareDraftEndDate) {
+    applyLeadsCustomCompareRange(leadsCompareDraftStartDate, leadsCompareDraftEndDate);
+  }
+  leadsCompareDraftStartDate = null;
+  leadsCompareDraftEndDate = null;
+}
+
+function leadsCompareCancelDraftRange() {
+  leadsComparePendingRangeStart = null;
+  leadsCompareDraftStartDate = null;
+  leadsCompareDraftEndDate = null;
+  renderLeadsCompareCalendar();
+  closeAllDatePopovers();
+}
+
+function leadsCompareApplyQuickRange(days) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  leadsComparePendingRangeStart = null;
+  leadsCompareDraftStartDate = null;
+  leadsCompareDraftEndDate = null;
+  applyLeadsCustomCompareRange(addDaysToDateStr(todayStr, -(days - 1)), todayStr);
+}
+
+function leadsCompareApplyDatePreset(preset) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  leadsComparePendingRangeStart = null;
+  leadsCompareDraftStartDate = null;
+  leadsCompareDraftEndDate = null;
+  applyLeadsCustomCompareRange(preset === 'fy' ? fiscalYearStartDate() : quarterStartDate(), todayStr);
+}
+
+function leadsCompareResetRange() {
+  leadsComparePendingRangeStart = null;
+  leadsCompareDraftStartDate = null;
+  leadsCompareDraftEndDate = null;
+  if (leadsCompareMode === 'custom') { leadsDisableCompare(); return; }
+  renderLeadsCompareCalendar();
+}
+
+document.getElementById('leadsCompareCustomBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const pop = document.getElementById('compareCustomPopoverLeads');
+  const wasHidden = pop.classList.contains('hidden');
+  closeAllDatePopovers();
+  if (wasHidden) {
+    leadsComparePendingRangeStart = null;
+    leadsCompareDraftStartDate = null;
+    leadsCompareDraftEndDate = null;
+    if (!(leadsCompareMode === 'custom' && leadsCustomCompareEnd)) {
+      leadsCompareCalendarViewDateLeft = monthStartUTC(currentEndDate, -1);
+      leadsCompareCalendarViewDateRight = monthStartUTC(currentEndDate, 0);
+    }
+    renderLeadsCompareCalendar();
+    pop.classList.remove('hidden');
+  }
+});
+document.getElementById('compareCalendarApplyBtnLeads').addEventListener('click', leadsCompareCommitRange);
+document.getElementById('compareCalendarCancelBtnLeads').addEventListener('click', leadsCompareCancelDraftRange);
+document.getElementById('compareCalendarResetBtnLeads').addEventListener('click', leadsCompareResetRange);
+document.getElementById('compareCalendarPrevBtnLeftLeads').addEventListener('click', () => {
+  leadsCompareCalendarViewDateLeft = new Date(Date.UTC(leadsCompareCalendarViewDateLeft.getUTCFullYear(), leadsCompareCalendarViewDateLeft.getUTCMonth() - 1, 1));
+  renderLeadsCompareCalendar();
+});
+document.getElementById('compareCalendarNextBtnLeftLeads').addEventListener('click', () => {
+  leadsCompareCalendarViewDateLeft = new Date(Date.UTC(leadsCompareCalendarViewDateLeft.getUTCFullYear(), leadsCompareCalendarViewDateLeft.getUTCMonth() + 1, 1));
+  renderLeadsCompareCalendar();
+});
+document.getElementById('compareCalendarPrevBtnRightLeads').addEventListener('click', () => {
+  leadsCompareCalendarViewDateRight = new Date(Date.UTC(leadsCompareCalendarViewDateRight.getUTCFullYear(), leadsCompareCalendarViewDateRight.getUTCMonth() - 1, 1));
+  renderLeadsCompareCalendar();
+});
+document.getElementById('compareCalendarNextBtnRightLeads').addEventListener('click', () => {
+  leadsCompareCalendarViewDateRight = new Date(Date.UTC(leadsCompareCalendarViewDateRight.getUTCFullYear(), leadsCompareCalendarViewDateRight.getUTCMonth() + 1, 1));
+  renderLeadsCompareCalendar();
+});
+document.getElementById('compareCalendarTwoMonthsLeads').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-date]');
+  if (!btn) return;
+  e.stopPropagation();
+  handleLeadsCompareDayClick(btn.dataset.date);
+});
+document.getElementById('compareQuickRangeRowLeads').addEventListener('click', (e) => {
+  const btn = e.target.closest('.quick-range-btn');
+  if (!btn) return;
+  pulseScale(btn);
+  if (btn.dataset.preset) leadsCompareApplyDatePreset(btn.dataset.preset);
+  else leadsCompareApplyQuickRange(parseInt(btn.dataset.days, 10));
+});
+
 function showSpends(show) {
   viewingSpends = show;
   const spendsEl = document.getElementById('spendsView');
@@ -879,14 +1277,36 @@ function showSpends(show) {
   }
 }
 
+// Toggles the topbar "Refreshing..." pill and dims the live metric areas
+// (rather than leaving the previous range's numbers sitting on screen looking
+// current) while a date-range/region refetch is in flight. Shared by the
+// Leads and Spends views since the topbar-title lives above both.
+function setRefreshing(isRefreshing, extraEls = []) {
+  document.getElementById('loadingIndicator').classList.toggle('hidden', !isRefreshing);
+  for (const el of extraEls) {
+    if (el) el.classList.toggle('is-refreshing', isRefreshing);
+  }
+}
+
 async function load() {
   const status = document.getElementById('status');
+  const refreshTargets = [
+    document.getElementById('overviewBoxes'),
+    document.querySelector('.tal-widget'),
+    document.getElementById('app'),
+  ];
 
   status.textContent = 'Loading...';
+  setRefreshing(true, refreshTargets);
+  leadsUpdateCompareToggle();
   try {
+    // The previous-period comparison fetch (if any) has no dependency on the
+    // primary range's response, so it runs alongside it instead of after --
+    // halving wall-clock time when a Leads comparison is active.
     const [res, spendsRes] = await Promise.all([
       fetch(`/api/clg-regions?startDate=${currentStartDate}&endDate=${currentEndDate}`),
       fetch(`/api/clg-spends?startDate=${currentStartDate}&endDate=${currentEndDate}`),
+      leadsFetchPrevIfNeeded(),
     ]);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Request failed');
@@ -901,6 +1321,8 @@ async function load() {
     status.textContent = '';
   } catch (err) {
     status.textContent = 'Error: ' + err.message;
+  } finally {
+    setRefreshing(false, refreshTargets);
   }
 }
 
@@ -1029,12 +1451,17 @@ const leadModalTitle = leadModal.querySelector('.modal-title');
 const modalCountBadge = document.getElementById('modalCountBadge');
 const modalTimeline = document.getElementById('modalTimeline');
 const modalFooter = document.getElementById('modalFooter');
+const modalEmpty = document.getElementById('modalEmpty');
+const modalSearchInput = document.getElementById('modalSearchInput');
+let modalAllRecords = [];
+// 'lead' (default) or 'account' -- set by whichever open*Modal call opened
+// the popup, read by modalRenderRecords to pick the right card layout/search
+// fields/wording. Both share the same modal DOM and search/close plumbing.
+let modalKind = 'lead';
 
-function openLeadModal(records, statusLabel) {
-  leadModalTitle.textContent = statusLabel;
-  modalCountBadge.textContent = `${records.length} lead${records.length === 1 ? '' : 's'}`;
+function modalRecordCardHtml(r) {
   const baseUrl = (lastData && lastData.sfRecordBaseUrl) || '';
-  modalTimeline.innerHTML = records.map(r => `
+  return `
     <div class="modal-timeline-item">
       <span class="modal-timeline-dot">&#128100;</span>
       <div class="modal-record-card">
@@ -1047,8 +1474,62 @@ function openLeadModal(records, statusLabel) {
         <div class="modal-record-source"><span>Source:</span> ${escapeHtml(r.source) || '&mdash;'}</div>
       </div>
     </div>
-  `).join('');
-  modalFooter.textContent = `Showing ${records.length} lead${records.length === 1 ? '' : 's'} in this cell`;
+  `;
+}
+
+// Total Accounts' click-through -- a Salesforce-linked Account, not a Lead,
+// so it shows the fields that popup is actually asked to show. Account Name
+// leads (as the Salesforce link, same as every other record kind here),
+// Industry Vertical follows -- repeating "Ecomm/D2C" as the top line across
+// every card in the list read as one undifferentiated block, since it's the
+// one field nearly every account in this list shares; the account's own name
+// is what actually distinguishes each card. Potential MRR sits below that,
+// Priority stays as the top-right badge.
+function modalAccountCardHtml(r) {
+  const baseUrl = (lastData && lastData.sfRecordBaseUrl) || '';
+  return `
+    <div class="modal-timeline-item">
+      <span class="modal-timeline-dot">&#127970;</span>
+      <div class="modal-record-card">
+        <div class="modal-record-top">
+          <a class="modal-record-company" href="${baseUrl}/${encodeURIComponent(r.id)}" target="_blank" rel="noopener">${escapeHtml(r.name)}</a>
+          <span class="modal-record-tag">${escapeHtml(r.priority) || 'Account'}</span>
+        </div>
+        <div class="modal-record-title">${escapeHtml(r.industryVertical) || '&mdash;'}</div>
+        <div class="modal-record-source"><span>Potential MRR:</span> ${escapeHtml(r.potentialMrr) || '&mdash;'}</div>
+      </div>
+    </div>
+  `;
+}
+
+function modalRenderRecords() {
+  const isAccount = modalKind === 'account';
+  const noun = isAccount ? 'account' : 'lead';
+  const searchFields = isAccount
+    ? (r) => [r.name, r.priority, r.industryVertical]
+    : (r) => [r.name, r.company, r.title, r.source];
+  const query = modalSearchInput.value.trim().toLowerCase();
+  const records = query
+    ? modalAllRecords.filter(r => searchFields(r).some(v => (v || '').toLowerCase().includes(query)))
+    : modalAllRecords;
+  modalCountBadge.textContent = `${records.length} ${noun}${records.length === 1 ? '' : 's'}`;
+  modalTimeline.innerHTML = records.map(isAccount ? modalAccountCardHtml : modalRecordCardHtml).join('');
+  modalEmpty.classList.toggle('hidden', records.length > 0);
+  modalFooter.textContent = query
+    ? `Showing ${records.length} of ${modalAllRecords.length} ${noun}${modalAllRecords.length === 1 ? '' : 's'} matching "${modalSearchInput.value.trim()}"`
+    : `Showing ${records.length} ${noun}${records.length === 1 ? '' : 's'} in this cell`;
+  if (gsapReady) animateRowsIn(modalTimeline.querySelectorAll('.modal-timeline-item'));
+}
+
+function openLeadModal(records, statusLabel, kind = 'lead') {
+  modalKind = kind;
+  leadModalTitle.textContent = statusLabel;
+  modalAllRecords = records;
+  modalSearchInput.value = '';
+  modalSearchInput.placeholder = kind === 'account'
+    ? 'Search by account name, priority, or vertical…'
+    : 'Search by name, company, or source…';
+  modalRenderRecords();
   leadModal.classList.remove('hidden');
   const box = leadModal.querySelector('.modal-box');
   if (gsapReady) {
@@ -1068,6 +1549,8 @@ function closeLeadModal() {
   gsap.to(leadModal, { autoAlpha: 0, duration: 0.22, ease: 'power2.in', onComplete: () => leadModal.classList.add('hidden') });
 }
 
+modalSearchInput.addEventListener('input', modalRenderRecords);
+
 // Delegated on `document`, not `#app` -- the TAL/Non-TAL widget's cards live
 // in the static #leadsView markup outside #app (which only ever holds the
 // pivot table), so a listener scoped to #app would miss clicks on them.
@@ -1076,7 +1559,7 @@ document.addEventListener('click', (e) => {
   if (!cell || !cell.dataset.records) return;
   const records = JSON.parse(decodeURIComponent(cell.dataset.records));
   const statusLabel = cell.dataset.statusLabel || '';
-  openLeadModal(records, statusLabel);
+  openLeadModal(records, statusLabel, cell.dataset.recordKind === 'account' ? 'account' : 'lead');
 });
 
 leadModal.querySelector('.modal-close').addEventListener('click', closeLeadModal);
@@ -1133,7 +1616,10 @@ let spendsPrevData = null;
 let spendsCustomCompareStart = null;
 let spendsCustomCompareEnd = null;
 
-function spendsDetectPeriod(startDate, endDate) {
+// Generic -- shared by the Spends tab's and the Leads tab's "Compare with
+// previous N days" auto-detect (only offered for a 1-30 day primary range,
+// otherwise "previous period" is ambiguous).
+function detectComparePeriod(startDate, endDate) {
   const start = new Date(startDate + 'T00:00:00Z');
   const end = new Date(endDate + 'T00:00:00Z');
   const days = Math.round((end - start) / 86400000) + 1;
@@ -1171,7 +1657,7 @@ function spendsGetPrevChannelData() {
 // "previous period"). A 'custom' comparison is independent of the primary
 // range's length, so it's left alone here.
 function spendsUpdateCompareToggle() {
-  spendsComparePeriod = spendsDetectPeriod(spendsStartDate, spendsEndDate);
+  spendsComparePeriod = detectComparePeriod(spendsStartDate, spendsEndDate);
   const btn = document.getElementById('spendsCompareToggle');
   const closeBtn = document.getElementById('spendsCompareClose');
   const customBtn = document.getElementById('spendsCompareCustomBtn');
@@ -1500,11 +1986,12 @@ function spendsRenderRadar(kpi, campaignCount) {
   }).join('');
 
   const isMsg = spendsIsMessaging();
-  document.getElementById('spendsRadarCampaigns').textContent = fmtInt(campaignCount);
+  animateNumberText(document.getElementById('spendsRadarCampaigns'), campaignCount);
   document.getElementById('spendsRadarImpressionsLabel').textContent = isMsg ? 'DELIVERED' : 'IMPRESSIONS';
-  document.getElementById('spendsRadarImpressions').textContent = isMsg ? fmtInt(kpi.delivered) : fmtInt(kpi.impressions);
+  animateNumberText(document.getElementById('spendsRadarImpressions'), isMsg ? kpi.delivered : kpi.impressions);
   document.getElementById('spendsRadarCpcLabel').textContent = isMsg ? 'UNIQUE CLICK %' : 'AVG CPC';
-  document.getElementById('spendsRadarCpc').textContent = isMsg ? `${fmtDec(kpi.uniqueClickedPct)}%` : fmtCurrency(kpi.cpc);
+  if (isMsg) animateNumberText(document.getElementById('spendsRadarCpc'), kpi.uniqueClickedPct, (v) => `${fmtDec(v)}%`);
+  else animateNumberText(document.getElementById('spendsRadarCpc'), kpi.cpc, fmtCurrency);
   document.getElementById('spendsRadarWindow').textContent = `▶ SCAN WINDOW: ${spendsStartDate} → ${spendsEndDate}`;
 
   const channelLabels = { linkedin: 'LINKEDIN', meta: 'META', email: 'EMAIL', whatsapp: 'WHATSAPP' };
@@ -1691,7 +2178,10 @@ function spendsRenderTable(skipRowAnim) {
   }
 }
 
-function spendsSetKpiDelta(elId, curr, prev) {
+// Generic -- sets a standalone delta-badge element (a sibling of the value
+// it's annotating, not part of its text) from a curr/prev pair. Shared by the
+// Spends KPI tiles/table and the Leads tab's date-range comparison.
+function setKpiDelta(elId, curr, prev) {
   const el = document.getElementById(elId);
   if (!el) return;
   el.innerHTML = prev === null || prev === undefined ? '' : deltaBadgeHtml(curr, prev);
@@ -1708,7 +2198,7 @@ function spendsUpdateKpiTiles(kpi, prevKpi) {
     document.getElementById(tile.labelId).textContent = tile.label;
     document.getElementById(tile.captionId).textContent = tile.caption;
     document.getElementById(tile.valueId).textContent = tile.fmt(tile.get(kpi));
-    spendsSetKpiDelta(tile.deltaId, tile.get(kpi), prevKpi ? tile.get(prevKpi) : null);
+    setKpiDelta(tile.deltaId, tile.get(kpi), prevKpi ? tile.get(prevKpi) : null);
   });
 }
 
@@ -1721,7 +2211,12 @@ function spendsRender() {
 
 async function spendsLoad() {
   const status = document.getElementById('spendsStatus');
+  const refreshTargets = [
+    document.querySelector('.radar-widget'),
+    document.getElementById('spendsTableWrap'),
+  ];
   status.textContent = 'Loading...';
+  setRefreshing(true, refreshTargets);
   spendsUpdateCompareToggle();
   try {
     const res = await fetch(`/api/clg-spends?startDate=${spendsStartDate}&endDate=${spendsEndDate}`);
@@ -1734,6 +2229,8 @@ async function spendsLoad() {
     status.textContent = '';
   } catch (err) {
     status.textContent = 'Error: ' + err.message;
+  } finally {
+    setRefreshing(false, refreshTargets);
   }
 }
 

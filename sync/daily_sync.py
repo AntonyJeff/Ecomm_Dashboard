@@ -859,6 +859,16 @@ if __name__ == "__main__":
     for region in SQL_OPPORTUNITY_FILTERS:
         sync_sql_for_region(token, instance_url, gc, region)
     sync_opportunities(token, instance_url, gc)
-    sync_accounts(token, instance_url, gc)
+    # PAUSED 2026-09-23: the "Global Ecomm TAL" tab is now a hand-curated
+    # ~2,000-account list the user maintains manually (new columns: Account
+    # ID(18-digit)/Account Name/Website/Account Owner/Account Team Members/
+    # Billing Country/Country Name/Account Priority/Potential MRR/Marketing
+    # Region/Website Category -- no CreatedDate). This function still writes
+    # the OLD 5-column/broader-SOQL-filter shape (~5,000 accounts) and would
+    # silently overwrite the curated list at the next scheduled run (see
+    # .github/workflows/daily-sync.yml, 3:00 AM IST daily) -- left disabled
+    # until sync_accounts() is rewritten to match the new list's source/filter,
+    # or the user confirms this tab should go back to being auto-synced.
+    # sync_accounts(token, instance_url, gc)
 
     print("\n[Done] Sync complete.")

@@ -62,6 +62,28 @@ body {
 
 .topbar-actions { display: flex; align-items: center; gap: 12px; }
 
+.loading-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.loading-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(108, 92, 231, 0.25);
+  border-top-color: var(--accent);
+  animation: loading-spin 0.7s linear infinite;
+}
+@keyframes loading-spin { to { transform: rotate(360deg); } }
+
+/* Dims live metrics while a fetch is in flight, rather than letting stale
+   numbers sit on screen and then jump straight to the new values. */
+.is-refreshing { opacity: 0.45; transition: opacity 0.15s ease; pointer-events: none; }
+
 /* Dashboard controls (region + date range) live in the topbar, beside the
    title, instead of the old always-open calendar/donut cards taking up a
    full row -- freeing that space for the Funnel View/Spends table below. */
@@ -122,24 +144,6 @@ body {
   border: 1px dashed var(--border);
   border-radius: 14px;
 }
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text-2);
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-.theme-toggle:hover { color: var(--text); border-color: var(--accent); }
-.theme-toggle-icon { font-size: 14px; line-height: 1; }
-
 .live-badge {
   display: inline-flex;
   align-items: center;
@@ -150,6 +154,8 @@ body {
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 5px 12px;
+  cursor: pointer;
+  user-select: none;
 }
 .live-dot {
   width: 7px;
@@ -708,6 +714,41 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
   border-bottom: 1px solid #1a1f35;
 }
 
+.modal-search {
+  position: relative;
+  margin: 0 0 14px;
+}
+.modal-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  color: #4a5568;
+  pointer-events: none;
+}
+.modal-search-input {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 9px 12px 9px 34px;
+  background: #141729;
+  border: 1px solid #1a1f35;
+  border-radius: 8px;
+  color: #e2e8f0;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.modal-search-input::placeholder { color: #4a5568; }
+.modal-search-input:focus { border-color: #3f2f8f; }
+
+.modal-empty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 13px;
+  color: #4a5568;
+}
+
 .modal-timeline {
   position: relative;
   display: flex;
@@ -764,6 +805,12 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Accounts popup renders this as the Salesforce link (Leads popup keeps it a
+   plain span) -- text-decoration only, so the link still reads as the same
+   bold heading style, with underline-on-hover as the only "this is clickable"
+   cue. */
+a.modal-record-company { text-decoration: none; cursor: pointer; }
+a.modal-record-company:hover { text-decoration: underline; color: #cbd5e1; }
 .modal-record-tag {
   flex: none;
   font-size: 11px;
@@ -1110,39 +1157,6 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
   flex-direction: column;
   gap: 14px;
 }
-.tal-widget-body { display: flex; gap: 14px; flex: 1; }
-.tal-stat-card {
-  flex: 1;
-  border-radius: 12px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  justify-content: center;
-  text-decoration: none;
-  transition: transform 0.15s ease, background 0.15s ease;
-}
-.tal-stat-card:hover { transform: translateY(-2px); }
-.tal-stat-tal { background: rgba(0, 214, 143, 0.08); border: 1px solid rgba(0, 214, 143, 0.25); }
-.tal-stat-tal:hover { background: rgba(0, 214, 143, 0.14) !important; color: inherit; }
-.tal-stat-nontal { background: rgba(255, 107, 107, 0.08); border: 1px solid rgba(255, 107, 107, 0.25); }
-.tal-stat-nontal:hover { background: rgba(255, 107, 107, 0.14) !important; color: inherit; }
-.tal-stat-label {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #4a5568;
-}
-.tal-stat-value {
-  font-family: "SF Mono", "Consolas", "Menlo", monospace;
-  font-size: 32px;
-  font-weight: 700;
-  color: #e2e8f0;
-}
-.tal-stat-tal .tal-stat-value { color: #00d68f; }
-.tal-stat-nontal .tal-stat-value { color: #ff6b6b; }
-.tal-stat-pct { font-size: 12px; color: #334155; }
 .tal-widget-bar {
   height: 6px;
   border-radius: 3px;
@@ -1171,10 +1185,12 @@ main { padding: 24px; display: flex; flex-direction: column; gap: 32px; min-widt
 }
 .tal-funnel-head { color: #4a5568; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
 .tal-funnel-label { color: #cbd5e1; font-weight: 600; }
-.tal-funnel-val { text-align: left; cursor: pointer; color: #a29bfe; }
+.tal-funnel-val { text-align: left; cursor: pointer; color: #a29bfe; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .tal-funnel-val:hover { text-decoration: underline; }
 .tal-funnel-val-na { cursor: default; color: #334155; }
 .tal-funnel-val-na:hover { text-decoration: none; }
+.tal-funnel-table .kpi-delta { font-size: 10px; padding: 1px 5px; }
+.pivot-table .kpi-delta { font-size: 10px; padding: 1px 5px; margin-left: 6px; }
 
 .tal-widget-status { display: flex; flex-direction: column; gap: 4px; }
 .radar-stat-sum { color: #a29bfe !important; }
@@ -1422,10 +1438,16 @@ tr.spends-creative-row .spends-td-creative {
   color: var(--accent);
 }
 :root[data-theme="light"] .modal-title { color: var(--text); border-bottom-color: var(--border); }
+:root[data-theme="light"] .modal-search-icon { color: var(--text-2); }
+:root[data-theme="light"] .modal-search-input { background: #faf9ff; border-color: var(--border); color: var(--text); }
+:root[data-theme="light"] .modal-search-input::placeholder { color: var(--text-2); }
+:root[data-theme="light"] .modal-search-input:focus { border-color: var(--accent); }
+:root[data-theme="light"] .modal-empty { color: var(--text-2); }
 :root[data-theme="light"] .modal-timeline::before { background: var(--border); }
 :root[data-theme="light"] .modal-timeline-dot { background: #f6f4fd; border-color: var(--accent); color: var(--accent); }
 :root[data-theme="light"] .modal-record-card { background: #faf9ff; border-color: var(--border); }
 :root[data-theme="light"] .modal-record-company { color: var(--text); }
+:root[data-theme="light"] a.modal-record-company:hover { color: var(--accent); }
 :root[data-theme="light"] .modal-record-tag { background: rgba(108, 92, 231, 0.12); color: var(--accent); }
 :root[data-theme="light"] .modal-record-name { color: var(--accent); }
 :root[data-theme="light"] .modal-record-name:hover { color: #4a3aa0; }
@@ -1457,8 +1479,6 @@ tr.spends-creative-row .spends-td-creative {
 :root[data-theme="light"] .radar-readout-status { color: var(--text-2); }
 
 :root[data-theme="light"] .tal-widget { border-color: var(--border); background: var(--surface); box-shadow: var(--card-shadow); }
-:root[data-theme="light"] .tal-stat-label { color: var(--text-2); }
-:root[data-theme="light"] .tal-stat-pct { color: var(--text-2); }
 :root[data-theme="light"] .tal-widget-status { color: var(--text-2); }
 :root[data-theme="light"] .tal-funnel-head { color: var(--text-2); }
 :root[data-theme="light"] .tal-funnel-label { color: var(--text); }

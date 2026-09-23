@@ -11,6 +11,7 @@
     <div class="topbar-title">
       <h1>Ecomm Dashboard</h1>
       <span id="lastUpdated" class="muted"></span>
+      <span id="loadingIndicator" class="loading-pill hidden"><span class="loading-spinner"></span>Refreshing&hellip;</span>
     </div>
 
     <div class="dashboard-controls" id="leadsControls">
@@ -69,6 +70,62 @@
           <span id="status" class="muted status-line"></span>
         </div>
       </div>
+
+      <button type="button" class="compare-toggle hidden" id="leadsCompareToggle"></button>
+      <div class="date-range-control compare-custom-control">
+        <button type="button" class="date-range-trigger compare-toggle" id="leadsCompareCustomBtn">
+          <span>&#8646;</span> <span id="leadsCompareCustomLabel">Compare with custom range</span>
+        </button>
+        <div class="calendar-card calendar-card-wide date-popover hidden" id="compareCustomPopoverLeads">
+          <div class="calendar-card-header">
+            <div class="calendar-card-heading">
+              <span class="calendar-range-pill hidden" id="compareCalendarRangePillLeads"></span>
+            </div>
+            <div class="calendar-card-actions">
+              <button type="button" class="calendar-reset-btn hidden" id="compareCalendarResetBtnLeads">
+                &#10005; Reset
+              </button>
+            </div>
+          </div>
+          <div class="quick-range-row" id="compareQuickRangeRowLeads">
+            <button type="button" class="quick-range-btn" data-days="7">7D</button>
+            <button type="button" class="quick-range-btn" data-days="14">14D</button>
+            <button type="button" class="quick-range-btn" data-days="30">30D</button>
+            <button type="button" class="quick-range-btn" data-preset="qtd">QTD</button>
+            <button type="button" class="quick-range-btn" data-preset="fy">Current FY</button>
+          </div>
+          <p class="calendar-helper-text hidden" id="compareCalendarHelperTextLeads">Click a start date, then click an end date</p>
+          <div class="calendar-two-months" id="compareCalendarTwoMonthsLeads">
+            <div class="calendar-month-col">
+              <div class="calendar-month-nav">
+                <button type="button" class="calendar-nav-btn" id="compareCalendarPrevBtnLeftLeads" aria-label="Previous month">&#8249;</button>
+                <span class="calendar-month-label" id="compareCalendarMonthLabelLeftLeads"></span>
+                <button type="button" class="calendar-nav-btn" id="compareCalendarNextBtnLeftLeads" aria-label="Next month">&#8250;</button>
+              </div>
+              <div class="calendar-weekdays">
+                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+              </div>
+              <div class="calendar-grid" id="compareCalendarGridLeftLeads"></div>
+            </div>
+            <div class="calendar-month-col">
+              <div class="calendar-month-nav">
+                <button type="button" class="calendar-nav-btn" id="compareCalendarPrevBtnRightLeads" aria-label="Previous month">&#8249;</button>
+                <span class="calendar-month-label" id="compareCalendarMonthLabelRightLeads"></span>
+                <button type="button" class="calendar-nav-btn" id="compareCalendarNextBtnRightLeads" aria-label="Next month">&#8250;</button>
+              </div>
+              <div class="calendar-weekdays">
+                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+              </div>
+              <div class="calendar-grid" id="compareCalendarGridRightLeads"></div>
+            </div>
+          </div>
+          <div class="calendar-apply-row hidden" id="compareCalendarApplyRowLeads">
+            <button type="button" class="calendar-cancel-btn" id="compareCalendarCancelBtnLeads">Cancel</button>
+            <button type="button" class="calendar-update-btn" id="compareCalendarApplyBtnLeads">Update</button>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="compare-toggle-close hidden" id="leadsCompareClose" aria-label="Clear comparison" title="Clear comparison">&times;</button>
     </div>
 
     <div class="dashboard-controls hidden" id="spendsControls">
@@ -186,11 +243,7 @@
     </div>
 
     <div class="topbar-actions">
-      <button type="button" id="themeToggle" class="theme-toggle" title="Switch theme" aria-label="Switch theme">
-        <span class="theme-toggle-icon" id="themeToggleIcon">&#9728;&#65039;</span>
-        <span id="themeToggleLabel">Light</span>
-      </button>
-      <span class="live-badge"><span class="live-dot"></span>Live</span>
+      <span class="live-badge" id="themeToggle"><span class="live-dot" id="themeToggleIcon"></span>Live</span>
     </div>
   </header>
 
@@ -205,7 +258,7 @@
           </span>
         </div>
         <div class="bento-value" id="overviewSum">-</div>
-        <div class="bento-caption">combined total</div>
+        <div class="bento-caption">combined total <span class="kpi-delta hidden" id="overviewSumDelta"></span></div>
       </div>
 
       <div class="bento-tile bento-tile-spends-summary" id="spendsSummaryTile">
@@ -220,7 +273,7 @@
           <div class="spends-summary-row"><span>Meta Spends</span><b id="overviewSpendsMeta">-</b></div>
           <div class="spends-summary-row spends-summary-row-total"><span>Total Spends</span><b id="overviewSpendsTotal">-</b></div>
         </div>
-        <button type="button" class="spends-nav-btn" id="spendsBox">Navigate to Spends tab <span>&#8594;</span></button>
+        <button type="button" class="spends-nav-btn" id="spendsBox">Click here to check Campaign-wise performance <span>&#8594;</span></button>
       </div>
 
       <div class="bento-tile">
@@ -231,7 +284,7 @@
           </span>
         </div>
         <div class="bento-value" id="overviewLeads">-</div>
-        <div class="bento-caption">this period</div>
+        <div class="bento-caption">this period <span class="kpi-delta hidden" id="overviewLeadsDelta"></span></div>
       </div>
 
       <div class="bento-tile">
@@ -242,7 +295,7 @@
           </span>
         </div>
         <div class="bento-value" id="overviewNdl">-</div>
-        <div class="bento-caption">non-duplicate leads</div>
+        <div class="bento-caption">non-duplicate leads <span class="kpi-delta hidden" id="overviewNdlDelta"></span></div>
       </div>
     </div>
 
@@ -250,18 +303,6 @@
       <div class="radar-header">
         <span class="radar-header-title">TAL vs Non-TAL</span>
         <span class="radar-live-text">&#9679; LIVE</span>
-      </div>
-      <div class="tal-widget-body">
-        <div class="tal-stat-card tal-stat-tal pivot-cell-clickable" id="talCountCard" title="Click to see TAL leads">
-          <div class="tal-stat-label">TAL Leads</div>
-          <div class="tal-stat-value" id="talCount">-</div>
-          <div class="tal-stat-pct" id="talPct">-</div>
-        </div>
-        <div class="tal-stat-card tal-stat-nontal pivot-cell-clickable" id="nonTalCountCard" title="Click to see Non-TAL leads">
-          <div class="tal-stat-label">Non-TAL Leads</div>
-          <div class="tal-stat-value" id="nonTalCount">-</div>
-          <div class="tal-stat-pct" id="nonTalPct">-</div>
-        </div>
       </div>
       <div class="tal-widget-bar">
         <div class="tal-widget-bar-tal" id="talWidgetBarTal"></div>
@@ -275,28 +316,33 @@
         </div>
         <div class="tal-funnel-row" data-stage="accounts">
           <span class="tal-funnel-label">Total Accounts</span>
-          <span class="tal-funnel-val" id="talFunnelAccountsTal">-</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelAccountsTal"><span class="tal-funnel-val-num">-</span></span>
           <span class="tal-funnel-val tal-funnel-val-na">&mdash;</span>
+        </div>
+        <div class="tal-funnel-row" data-stage="leads">
+          <span class="tal-funnel-label">Leads</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelLeadsTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelLeadsTalDelta"></span></span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelLeadsNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelLeadsNonTalDelta"></span></span>
         </div>
         <div class="tal-funnel-row" data-stage="iql">
           <span class="tal-funnel-label">IQL</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelIqlTal">-</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelIqlNonTal">-</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelIqlTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelIqlTalDelta"></span></span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelIqlNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelIqlNonTalDelta"></span></span>
         </div>
         <div class="tal-funnel-row" data-stage="mql">
           <span class="tal-funnel-label">MQL</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMqlTal">-</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMqlNonTal">-</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMqlTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMqlTalDelta"></span></span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMqlNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMqlNonTalDelta"></span></span>
         </div>
         <div class="tal-funnel-row" data-stage="sql">
           <span class="tal-funnel-label">SQL</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelSqlTal">-</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelSqlNonTal">-</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelSqlTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelSqlTalDelta"></span></span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelSqlNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelSqlNonTalDelta"></span></span>
         </div>
         <div class="tal-funnel-row" data-stage="mrr">
           <span class="tal-funnel-label">MRR</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMrrTal">-</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMrrNonTal">-</span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMrrTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMrrTalDelta"></span></span>
+          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMrrNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMrrNonTalDelta"></span></span>
         </div>
       </div>
 
@@ -550,7 +596,12 @@
         <span class="modal-count-badge" id="modalCountBadge"></span>
       </div>
       <h3 class="modal-title"></h3>
+      <div class="modal-search">
+        <span class="modal-search-icon">&#128269;</span>
+        <input type="text" class="modal-search-input" id="modalSearchInput" placeholder="Search by name, company, or source&hellip;" autocomplete="off">
+      </div>
       <div class="modal-timeline" id="modalTimeline"></div>
+      <div class="modal-empty hidden" id="modalEmpty">No leads match your search.</div>
       <div class="modal-footer" id="modalFooter"></div>
     </div>
   </div>
