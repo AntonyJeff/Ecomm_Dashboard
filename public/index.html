@@ -304,52 +304,68 @@
         <span class="radar-header-title">TAL vs Non-TAL</span>
         <span class="radar-live-text">&#9679; LIVE</span>
       </div>
-      <div class="tal-widget-bar">
-        <div class="tal-widget-bar-tal" id="talWidgetBarTal"></div>
-      </div>
 
       <div class="tal-funnel-table" id="talFunnelTable">
-        <div class="tal-funnel-row tal-funnel-head">
+        <div class="tal-funnel-legend">
           <span class="tal-funnel-label">Stage</span>
-          <span>TAL</span>
-          <span>Non-TAL</span>
+          <span class="tal-funnel-legend-item"><span class="tal-legend-swatch tal-legend-swatch-tal"></span>TAL</span>
+          <span class="tal-funnel-legend-item"><span class="tal-legend-swatch tal-legend-swatch-nontal"></span>Non-TAL</span>
         </div>
         <div class="tal-funnel-row" data-stage="accounts">
-          <span class="tal-funnel-label">Total Accounts</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelAccountsTal"><span class="tal-funnel-val-num">-</span></span>
-          <span class="tal-funnel-val tal-funnel-val-na">&mdash;</span>
+          <div class="tal-funnel-row-top">
+            <span class="tal-funnel-label">Total Accounts</span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelAccountsTal"><span class="tal-funnel-val-num">-</span></span>
+            <span class="tal-funnel-val tal-funnel-val-na">&mdash;</span>
+          </div>
+          <div class="tal-funnel-bar"><div class="tal-funnel-bar-tal" id="talFunnelAccountsBarTal"></div></div>
         </div>
         <div class="tal-funnel-row" data-stage="leads">
-          <span class="tal-funnel-label">Leads</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelLeadsTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelLeadsTalDelta"></span></span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelLeadsNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelLeadsNonTalDelta"></span></span>
+          <div class="tal-funnel-row-top">
+            <span class="tal-funnel-label">Leads</span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelLeadsTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelLeadsTalDelta"></span></span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelLeadsNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelLeadsNonTalDelta"></span></span>
+          </div>
+          <div class="tal-funnel-bar"><div class="tal-funnel-bar-tal" id="talFunnelLeadsBarTal"></div></div>
         </div>
         <div class="tal-funnel-row" data-stage="iql">
-          <span class="tal-funnel-label">IQL</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelIqlTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelIqlTalDelta"></span></span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelIqlNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelIqlNonTalDelta"></span></span>
+          <div class="tal-funnel-row-top">
+            <span class="tal-funnel-label">IQL</span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelIqlTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelIqlTalDelta"></span></span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelIqlNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelIqlNonTalDelta"></span></span>
+          </div>
+          <div class="tal-funnel-bar"><div class="tal-funnel-bar-tal" id="talFunnelIqlBarTal"></div></div>
         </div>
         <div class="tal-funnel-row" data-stage="mql">
-          <span class="tal-funnel-label">MQL</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMqlTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMqlTalDelta"></span></span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMqlNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMqlNonTalDelta"></span></span>
+          <div class="tal-funnel-row-top">
+            <span class="tal-funnel-label">MQL</span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMqlTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMqlTalDelta"></span></span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMqlNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMqlNonTalDelta"></span></span>
+          </div>
+          <div class="tal-funnel-bar"><div class="tal-funnel-bar-tal" id="talFunnelMqlBarTal"></div></div>
         </div>
         <div class="tal-funnel-row" data-stage="sql">
-          <span class="tal-funnel-label">SQL</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelSqlTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelSqlTalDelta"></span></span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelSqlNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelSqlNonTalDelta"></span></span>
+          <div class="tal-funnel-row-top">
+            <span class="tal-funnel-label">SQL</span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelSqlTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelSqlTalDelta"></span></span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelSqlNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelSqlNonTalDelta"></span></span>
+          </div>
+          <div class="tal-funnel-bar"><div class="tal-funnel-bar-tal" id="talFunnelSqlBarTal"></div></div>
         </div>
-        <div class="tal-funnel-row" data-stage="mrr">
-          <span class="tal-funnel-label">MRR</span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMrrTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMrrTalDelta"></span></span>
-          <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMrrNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMrrNonTalDelta"></span></span>
+        <div class="tal-funnel-row tal-funnel-row-nobar" data-stage="mrr">
+          <div class="tal-funnel-row-top">
+            <span class="tal-funnel-label">MRR</span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMrrTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMrrTalDelta"></span></span>
+            <span class="tal-funnel-val pivot-cell-clickable" id="talFunnelMrrNonTal"><span class="tal-funnel-val-num">-</span><span class="kpi-delta hidden" id="talFunnelMrrNonTalDelta"></span></span>
+          </div>
         </div>
       </div>
 
-      <div class="radar-readout-status tal-widget-status">
-        <div>&#9654; SALESFORCE SYNCED <span class="radar-dot-ok">&#9679;</span></div>
-        <div>&#9654; SHEET LIVE <span class="radar-dot-ok">&#9679;</span></div>
-        <div id="talWindow">&#9654; SCAN WINDOW: --</div>
+      <div class="tal-widget-status">
+        <div class="tal-widget-status-row">
+          <span class="tal-status-item"><span class="tal-status-dot"></span>Salesforce synced</span>
+          <span class="tal-status-item"><span class="tal-status-dot"></span>Sheet live</span>
+        </div>
+        <div class="tal-widget-status-scan" id="talWindow">Scan window: --</div>
       </div>
     </div>
   </div>

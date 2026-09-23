@@ -642,19 +642,33 @@ function renderTalWidget() {
   const total = talCount + nonTalCount;
   const talPct = total > 0 ? (talCount / total) * 100 : 0;
 
-  document.getElementById('talWindow').textContent = `▶ SCAN WINDOW: ${currentStartDate} → ${currentEndDate}`;
-  document.getElementById('talWidgetBarTal').style.width = `${total ? talPct : 50}%`;
+  document.getElementById('talWindow').textContent = `Scan window: ${currentStartDate} → ${currentEndDate}`;
 
   const accountsCell = document.getElementById('talFunnelAccountsTal');
   animateNumberText(accountsCell.querySelector('.tal-funnel-val-num') || accountsCell, accountCount);
   accountsCell.dataset.records = encodeURIComponent(JSON.stringify(accountRecords));
   accountsCell.dataset.statusLabel = 'TAL Accounts';
   accountsCell.dataset.recordKind = 'account';
+  // Total Accounts has no Non-TAL concept (see the funnel table's comment), so
+  // its bar is always a full TAL bar rather than a real proportion.
+  setTalRowBar('talFunnelAccountsBarTal', 1, 0);
 
   renderTalFunnelCell('talFunnelLeadsTal', talCount, talRecords, 'TAL Leads', prev ? prev.talCount : null);
   renderTalFunnelCell('talFunnelLeadsNonTal', nonTalCount, nonTalRecords, 'Non-TAL Leads', prev ? prev.nonTalCount : null);
+  setTalRowBar('talFunnelLeadsBarTal', talCount, nonTalCount);
 
   renderTalFunnelTable(regionsToSum);
+}
+
+// Width of a stage row's TAL/Non-TAL split bar -- a bare percentage-of-total,
+// same math as the widget's own talPct above, just per-row instead of once
+// for the whole widget. Falls back to a half-filled bar when both sides are
+// 0 (nothing to show a real proportion for yet).
+function setTalRowBar(elId, tal, nonTal) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const total = tal + nonTal;
+  el.style.width = `${total > 0 ? (tal / total) * 100 : 50}%`;
 }
 
 // IQL/MQL/SQL/MRR TAL/Non-TAL -- same verdict, same per-stage .tal object
@@ -713,10 +727,13 @@ function renderTalFunnelTable(regionsToSum) {
 
   renderTalFunnelCell('talFunnelIqlTal', sums.iql.tal, sums.iql.talRecords, 'TAL IQL', prev('iql', 'tal'));
   renderTalFunnelCell('talFunnelIqlNonTal', sums.iql.nonTal, sums.iql.nonTalRecords, 'Non-TAL IQL', prev('iql', 'nonTal'));
+  setTalRowBar('talFunnelIqlBarTal', sums.iql.tal, sums.iql.nonTal);
   renderTalFunnelCell('talFunnelMqlTal', sums.mql.tal, sums.mql.talRecords, 'TAL MQL', prev('mql', 'tal'));
   renderTalFunnelCell('talFunnelMqlNonTal', sums.mql.nonTal, sums.mql.nonTalRecords, 'Non-TAL MQL', prev('mql', 'nonTal'));
+  setTalRowBar('talFunnelMqlBarTal', sums.mql.tal, sums.mql.nonTal);
   renderTalFunnelCell('talFunnelSqlTal', sums.sql.tal, sums.sql.talRecords, 'TAL SQL', prev('sql', 'tal'));
   renderTalFunnelCell('talFunnelSqlNonTal', sums.sql.nonTal, sums.sql.nonTalRecords, 'Non-TAL SQL', prev('sql', 'nonTal'));
+  setTalRowBar('talFunnelSqlBarTal', sums.sql.tal, sums.sql.nonTal);
   renderTalFunnelCell('talFunnelMrrTal', sums.mrr.tal, sums.mrr.talRecords, 'TAL MRR', prev('mrr', 'tal'), fmtCurrency);
   renderTalFunnelCell('talFunnelMrrNonTal', sums.mrr.nonTal, sums.mrr.nonTalRecords, 'Non-TAL MRR', prev('mrr', 'nonTal'), fmtCurrency);
 }
