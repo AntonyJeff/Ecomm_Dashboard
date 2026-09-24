@@ -1,36 +1,39 @@
 /**
  * Owned Media Refresh (Smartech) — Google Apps Script port.
  *
- * Replaces sync-owned-media.mjs / the GitHub Actions "Owned Media Refresh" workflow.
+ * Two Smartech report emails land daily in antony.jefrin@netcore.ai from
+ * admin@netcorecloud.com: one "Campaign_Multi_Email_Summary_Daily_T-1_<date>", one
+ * "Campaign_Multi_Whatsapp_Summary_Daily_T-1_<date>" -- each with a
+ * reports.netcoresmartech.com/jobs/....zip download link in the body (confirmed live).
+ * This script downloads each, unzips the CSV inside, and appends every new campaign
+ * row straight into the SAME dashboard sheet the rest of this project reads from --
+ * the 'Email' and 'Whatsapp' tabs, no separate Owned/Paid split (confirmed live: those
+ * tabs hold every campaign, ecom and non-ecom alike -- api/clg-spends.js does its own
+ * Ecomm/region filtering by Campaign Name when it READS these tabs, so this script's
+ * only job is to get every row in accurately, not to pre-filter anything).
+ *
+ * api/clg-spends.js reads exactly 8 columns from these tabs by NAME (not position):
+ * Campaign Name, Sent Date, Sent, Delivered, Total Opened/Read, Unique Opened,
+ * Total Clicked, Unique Clicked -- getting those 8 right is what actually matters for
+ * the live Spends tab; every other column in the sheet (Campaign Id, Channel, Status,
+ * Delivered %, ...) is presentational and filled on a best-effort basis below.
+ *
  * Runs entirely under the Google account that authorizes this script (no exportable
  * refresh token, no external OAuth client, nothing for Google to revoke the way the
  * interim GMAIL_REFRESH_TOKEN kept getting revoked).
- *
- * 2026-09: Smartech now delivers these reports as a .zip file attached directly to
- * the email, not a "click to download" link — confirmed live (a report email opened
- * in Gmail showed the .zip as a normal attachment, with no download link in the body).
- * fetchMatchingReportCsvs_ previously only understood the link form (it searched Gmail
- * for the word "Download" and looked for an href to reports.netcoresmartech.com),
- * which is almost certainly why nothing was landing in the sheet -- the attachment
- * form was invisible to it. It now checks the message's attachments first and falls
- * back to the old link-scraping behavior, so either delivery form still works.
  */
 
-// ---- Constants (mirrors sync-owned-media.mjs exactly) ----
-const CLG_PERF_SHEET_ID = '16TFxFnmEVcz9cACELWvqCRVtiQsgUBU-4mI7HrE599E';
-const TANVI_EMAIL_NAME = 'tanvi dhotre';
-const TANVI_WHATSAPP_SENDER = '8657948476';
-const MAX_EMAILS_TO_SCAN = 10;
+// This is the real, shared dashboard sheet -- same CLG_SHEET_ID the Vercel API
+// (api/clg-regions.js / api/clg-spends.js) reads, confirmed against
+// https://docs.google.com/spreadsheets/d/15zOa2W1SZwPRAbrKzqD6RDcGA9oW8CXomhkIHLwlqew
+const CLG_SHEET_ID = '15zOa2W1SZwPRAbrKzqD6RDcGA9oW8CXomhkIHLwlqew';
+const EMAIL_TAB_NAME = 'Email';
+const WHATSAPP_TAB_NAME = 'Whatsapp';
+const MAX_REPORTS_TO_SCAN = 10;
 // Smartech's report file server rejects requests with no/default User-Agent (403).
-// Only used by the link-based fallback path now -- the attachment path never hits
-// Smartech's server at all.
 const FETCH_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' };
 
-function isClg_(name) {
-  return (name || '').toLowerCase().indexOf('clg') !== -1;
-}
-
-// ---- CSV parsing (verbatim port of the Node version) ----
+// ---- CSV parsing ----
 function parseCsv_(text) {
   const rows = [];
   let row = [], field = '', inQuotes = false;
@@ -53,25 +56,30 @@ function parseCsv_(text) {
   if (field !== '' || row.length > 0) { row.push(field); rows.push(row); }
   return rows;
 }
-function findCol_(headers, name) {
-  return headers.findIndex(function (h) { return h.trim() === name; });
+// Tries each candidate header name in order (case/whitespace-insensitive) and returns
+// the first column index that exists -- Smartech's exact field naming for a couple of
+// these (Total Opened / Total Clicked, Campaign Id) hasn't been confirmed against a
+// real downloaded CSV yet, so this tries the likely variants instead of assuming one.
+// runSync() logs the real header row on every run specifically so a wrong guess here
+// is visible immediately in the execution log rather than silently leaving a column
+// blank forever.
+function findColAny_(headers, candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const idx = headers.findIndex(function (h) { return (h || '').toString().trim().toLowerCase() === candidates[i].toLowerCase(); });
+    if (idx !== -1) return idx;
+  }
+  return -1;
 }
 // Smartech's CSV export can carry a leading UTF-8 BOM -- left uncaught, it would
-// silently corrupt EVERY row: the BOM lands on the first header cell, so
-// findCol_(headers, 'Campaign Name') stops matching (compares "﻿Campaign Name"
-// against "Campaign Name"), returns -1, and every row's r[nameCol] becomes
-// undefined with no error thrown anywhere. (The previous version had
-// `.replace(/^/, '')` here, which is a no-op -- matches and replaces an empty
-// string at position 0 -- almost certainly a broken attempt at this same fix.)
+// silently corrupt EVERY row: the BOM lands on the first header cell, so header
+// matching stops working for that one column with no error thrown anywhere.
 function stripBom_(text) {
   return text.replace(/^﻿/, '');
 }
 
 // ---- Gmail: find matching Smartech report emails, get the CSV out of them ----
 // Filtering by subject IN THE SEARCH ITSELF (not after fetching each message) is what
-// keeps this cheap — same lesson learned in the Node version's quota-exceeded bug.
-// Query is subject-only now (not `"Download"`) since the attachment form of this
-// email may not contain that word anywhere in its body.
+// keeps this cheap.
 function fetchMatchingReportCsvs_(subjectContains, maxCount) {
   const query = '(from:admin@netcorecloud.com OR from:admin@netcore.ai) subject:"' + subjectContains + '"';
   const threads = GmailApp.search(query, 0, 40);
@@ -83,6 +91,9 @@ function fetchMatchingReportCsvs_(subjectContains, maxCount) {
       const subject = msg.getSubject() || '';
       if (subject.indexOf(subjectContains) === -1) continue; // safety net; the query above already filters
 
+      // Confirmed live: both reports are the "click to download" link form, not a
+      // direct attachment -- extractCsvFromAttachment_ is checked first anyway in
+      // case that ever changes, but is a no-op today.
       const csvText = extractCsvFromAttachment_(msg) || extractCsvFromLink_(msg);
       if (csvText) csvs.push(csvText);
     }
@@ -90,9 +101,6 @@ function fetchMatchingReportCsvs_(subjectContains, maxCount) {
   return csvs;
 }
 
-// Primary path as of 2026-09: the report .zip is attached directly to the email.
-// A GmailAttachment is itself a Blob, so it can go straight into Utilities.unzip
-// with no download step at all.
 function extractCsvFromAttachment_(msg) {
   const attachments = msg.getAttachments();
   for (let i = 0; i < attachments.length; i++) {
@@ -109,10 +117,8 @@ function extractCsvFromAttachment_(msg) {
   return null;
 }
 
-// Fallback path: the original "click here to download" link form, kept in case
-// Smartech ever reverts or sends a mix of both. The download link is usually a
-// hyperlink (href) rather than visible text, so check the HTML body first; fall
-// back to the plain-text body just in case.
+// The download link is usually a hyperlink (href) rather than visible text, so check
+// the HTML body first; fall back to the plain-text body just in case.
 function extractCsvFromLink_(msg) {
   const html = msg.getBody();
   const plain = msg.getPlainBody();
@@ -131,41 +137,62 @@ function extractCsvFromLink_(msg) {
   return stripBom_(csvFile.getDataAsString('UTF-8'));
 }
 
-// ---- Aggregation (verbatim port — groups split-test rows by Campaign Name; across
-// multiple reports, only the FIRST occurrence of a name is kept) ----
-function aggregateEmail_(csvs, keepRow) {
+// ---- Aggregation -- groups split-test rows by Campaign Name (a campaign run as an
+// A/B test appears as multiple rows in Smartech's export, one per variant); summed
+// into one row per campaign name. Across multiple reports scanned in one run, only
+// the FIRST occurrence of a name is kept (a campaign shouldn't be double-counted if
+// it happens to show up in more than one scanned report). No Ecomm/region filtering
+// here -- that happens when the dashboard READS this sheet, not when writing to it,
+// so every campaign (BFSI, webinars, whatever) gets appended, matching what's already
+// in the sheet today. ----
+function aggregateCampaigns_(csvs) {
   const groups = {};
   csvs.forEach(function (csvText) {
     const rows = parseCsv_(csvText);
+    if (rows.length < 2) return;
     const headers = rows[0];
-    const nameCol = findCol_(headers, 'Campaign Name');
-    const senderCol = findCol_(headers, 'Sender');
-    const sentDateCol = findCol_(headers, 'Sent Date');
-    const sentCol = findCol_(headers, 'Sent');
-    const deliveredCol = findCol_(headers, 'Delivered');
-    const uniqOpenedCol = findCol_(headers, 'Unique Opened');
-    const uniqClickedCol = findCol_(headers, 'Unique Clicked');
-    const typeCol = findCol_(headers, 'Campaign Type');
-    const subjectCol = findCol_(headers, 'Subject line or Title');
+    Logger.log('CSV headers seen: ' + headers.join(' | '));
+    const cols = {
+      campaignId: findColAny_(headers, ['Campaign ID', 'Campaign Id', 'CampaignId']),
+      campaignName: findColAny_(headers, ['Campaign Name']),
+      campaignType: findColAny_(headers, ['Campaign Type']),
+      messageType: findColAny_(headers, ['Message Type']),
+      sender: findColAny_(headers, ['Sender']),
+      sentDate: findColAny_(headers, ['Sent Date']),
+      sent: findColAny_(headers, ['Sent']),
+      delivered: findColAny_(headers, ['Delivered']),
+      totalOpened: findColAny_(headers, ['Total Opened', 'Total Read', 'Total Opened/Read']),
+      uniqueOpened: findColAny_(headers, ['Unique Opened']),
+      totalClicked: findColAny_(headers, ['Total Clicked']),
+      uniqueClicked: findColAny_(headers, ['Unique Clicked']),
+      subject: findColAny_(headers, ['Subject line or Title', 'Subject']),
+    };
 
     const perReport = {};
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
-      const name = r[nameCol];
-      const sender = (r[senderCol] || '').toLowerCase();
-      if (!keepRow(name, sender)) continue;
+      const name = cols.campaignName !== -1 ? r[cols.campaignName] : '';
+      if (!name) continue;
       if (!perReport[name]) {
         perReport[name] = {
-          campaignName: name, sentDate: r[sentDateCol], sent: 0, delivered: 0,
-          uniqueOpened: 0, uniqueClicked: 0, campaignType: r[typeCol], subject: r[subjectCol],
+          campaignId: cols.campaignId !== -1 ? r[cols.campaignId] : '',
+          campaignName: name,
+          campaignType: cols.campaignType !== -1 ? r[cols.campaignType] : '',
+          messageType: cols.messageType !== -1 ? r[cols.messageType] : '',
+          sender: cols.sender !== -1 ? r[cols.sender] : '',
+          sentDate: cols.sentDate !== -1 ? r[cols.sentDate] : '',
+          subject: cols.subject !== -1 ? r[cols.subject] : '',
+          sent: 0, delivered: 0, totalOpened: 0, uniqueOpened: 0, totalClicked: 0, uniqueClicked: 0,
         };
       }
       const g = perReport[name];
-      if (r[sentDateCol] < g.sentDate) g.sentDate = r[sentDateCol];
-      g.sent += Number(r[sentCol]) || 0;
-      g.delivered += Number(r[deliveredCol]) || 0;
-      g.uniqueOpened += Number(r[uniqOpenedCol]) || 0;
-      g.uniqueClicked += Number(r[uniqClickedCol]) || 0;
+      if (cols.sentDate !== -1 && r[cols.sentDate] < g.sentDate) g.sentDate = r[cols.sentDate];
+      if (cols.sent !== -1) g.sent += Number(r[cols.sent]) || 0;
+      if (cols.delivered !== -1) g.delivered += Number(r[cols.delivered]) || 0;
+      if (cols.totalOpened !== -1) g.totalOpened += Number(r[cols.totalOpened]) || 0;
+      if (cols.uniqueOpened !== -1) g.uniqueOpened += Number(r[cols.uniqueOpened]) || 0;
+      if (cols.totalClicked !== -1) g.totalClicked += Number(r[cols.totalClicked]) || 0;
+      if (cols.uniqueClicked !== -1) g.uniqueClicked += Number(r[cols.uniqueClicked]) || 0;
     }
     Object.keys(perReport).forEach(function (name) {
       if (!groups[name]) groups[name] = perReport[name];
@@ -174,101 +201,68 @@ function aggregateEmail_(csvs, keepRow) {
   return Object.keys(groups).map(function (k) { return groups[k]; });
 }
 
+// Builds one sheet row per aggregated campaign, matching whatever the target tab's
+// OWN header row actually is (by name, not a hardcoded position) -- so this works
+// against 'Email' and 'Whatsapp' even though they don't have identical column sets,
+// and keeps working if a column ever gets reordered/added/removed in the sheet
+// itself. Any header the sheet has that isn't one of these known fields is just left
+// blank for the new row rather than guessed at.
+function buildFieldMap_(g, channelLabel) {
+  const deliveredPct = g.sent ? Math.round((g.delivered / g.sent) * 10000) / 100 : '';
+  const uniqueOpenedPct = g.delivered ? Math.round((g.uniqueOpened / g.delivered) * 10000) / 100 : '';
+  const uniqueClickedPct = g.delivered ? Math.round((g.uniqueClicked / g.delivered) * 10000) / 100 : '';
+  return {
+    'campaign id': g.campaignId || '',
+    'campaign name': g.campaignName,
+    'channel': channelLabel,
+    'status': 'Sent',
+    'campaign type': g.campaignType || '',
+    'message type': g.messageType || '',
+    'sender': g.sender || '',
+    'sent date': g.sentDate,
+    'published': g.sent,
+    'sent': g.sent,
+    'delivered': g.delivered,
+    'delivered %': deliveredPct,
+    'total opened/read': g.totalOpened || '',
+    'total opened': g.totalOpened || '',
+    'total read': g.totalOpened || '',
+    'unique opened': g.uniqueOpened,
+    'unique opened %': uniqueOpenedPct,
+    'total clicked': g.totalClicked || '',
+    'unique clicked': g.uniqueClicked,
+    'unique clicked %': uniqueClickedPct,
+    'subject line or title': g.subject || '',
+  };
+}
 
-function aggregateWhatsapp_(csvs, keepRow) {
-  const groups = {};
-  csvs.forEach(function (csvText) {
-    const rows = parseCsv_(csvText);
-    const headers = rows[0];
-    const nameCol = findCol_(headers, 'Campaign Name');
-    const typeCol = findCol_(headers, 'Campaign Type');
-    const senderCol = findCol_(headers, 'Sender');
-    const sentDateCol = findCol_(headers, 'Sent Date');
-    const sentCol = findCol_(headers, 'Sent');
-    const deliveredCol = findCol_(headers, 'Delivered');
-    const uniqOpenedCol = findCol_(headers, 'Unique Opened');
-    const uniqClickedCol = findCol_(headers, 'Unique Clicked');
+function appendCampaigns_(campaigns, tabName, channelLabel, label) {
+  const sheet = SpreadsheetApp.openById(CLG_SHEET_ID).getSheetByName(tabName);
+  if (!sheet) { Logger.log(label + ': ERROR -- no tab named "' + tabName + '" found in the sheet.'); return; }
 
-    const perReport = {};
-    for (let i = 1; i < rows.length; i++) {
-      const r = rows[i];
-      const name = r[nameCol];
-      const sender = (r[senderCol] || '').toString().trim();
-      if (!keepRow(name, sender)) continue;
-      if (!perReport[name]) {
-        perReport[name] = {
-          campaignName: name, sender: sender, campaignType: r[typeCol], sentDate: r[sentDateCol],
-          sent: 0, delivered: 0, uniqueOpened: 0, uniqueClicked: 0,
-        };
-      }
-      const g = perReport[name];
-      if (r[sentDateCol] < g.sentDate) g.sentDate = r[sentDateCol];
-      g.sent += Number(r[sentCol]) || 0;
-      g.delivered += Number(r[deliveredCol]) || 0;
-      g.uniqueOpened += Number(r[uniqOpenedCol]) || 0;
-      g.uniqueClicked += Number(r[uniqClickedCol]) || 0;
-    }
-    Object.keys(perReport).forEach(function (name) {
-      if (!groups[name]) groups[name] = perReport[name];
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const nameColIdx = headers.findIndex(function (h) { return (h || '').toString().trim().toLowerCase() === 'campaign name'; });
+  if (nameColIdx === -1) { Logger.log(label + ': ERROR -- "' + tabName + '" has no "Campaign Name" column.'); return; }
+
+  const lastRow = sheet.getLastRow();
+  const existingNames = {};
+  if (lastRow > 1) {
+    sheet.getRange(2, nameColIdx + 1, lastRow - 1, 1).getValues().forEach(function (r) { existingNames[r[0]] = true; });
+  }
+
+  const newOnes = campaigns.filter(function (c) { return !existingNames[c.campaignName]; });
+  Logger.log(label + ': ' + campaigns.length + ' campaigns found across scanned reports, ' + newOnes.length + ' are new.');
+  if (newOnes.length === 0) return;
+
+  const rows = newOnes.map(function (g) {
+    const fieldMap = buildFieldMap_(g, channelLabel);
+    return headers.map(function (h) {
+      const key = (h || '').toString().trim().toLowerCase();
+      return Object.prototype.hasOwnProperty.call(fieldMap, key) ? fieldMap[key] : '';
     });
   });
-  return Object.keys(groups).map(function (k) { return groups[k]; });
-}
-
-// ---- Sheet writes (SpreadsheetApp instead of the Sheets REST API; same dedup-by-name
-// + same exact column layout as sync-owned-media.mjs's processEmail/processWhatsapp) ----
-function appendNewRows_(tabName, allRows, label) {
-  if (allRows.length === 0) { Logger.log(label + ': nothing to append.'); return; }
-  const sheet = SpreadsheetApp.openById(CLG_PERF_SHEET_ID).getSheetByName(tabName);
-  const range = sheet.getLastRow() + 1;
-  sheet.getRange(range, 1, allRows.length, allRows[0].length).setValues(allRows);
-}
-
-function processEmail_(campaigns, tabName, label) {
-  const sheet = SpreadsheetApp.openById(CLG_PERF_SHEET_ID).getSheetByName(tabName);
-  const data = sheet.getDataRange().getValues();
-  const existingNames = {};
-  for (let i = 1; i < data.length; i++) existingNames[data[i][1]] = true;
-  const newOnes = campaigns.filter(function (c) { return !existingNames[c.campaignName]; });
-  Logger.log(label + ': ' + campaigns.length + ' campaigns found across scanned reports, ' + newOnes.length + ' are new.');
-  if (newOnes.length === 0) return;
-  const rows = newOnes.map(function (g) {
-    return [
-      '', g.campaignName, g.campaignType || '', '', g.subject || '', '', g.sentDate, '',
-      g.sent, g.delivered,
-      g.sent ? Math.round((g.delivered / g.sent) * 10000) / 100 : '',
-      '', g.uniqueOpened,
-      g.delivered ? Math.round((g.uniqueOpened / g.delivered) * 10000) / 100 : '',
-      '', g.uniqueClicked,
-      g.delivered ? Math.round((g.uniqueClicked / g.delivered) * 10000) / 100 : '',
-      '', '', '', '', '', '', '', '', '',
-    ];
-  });
-  appendNewRows_(tabName, rows, label);
-  Logger.log(label + ': appended ' + newOnes.map(function (g) { return g.campaignName; }).join(', '));
-}
-
-function processWhatsapp_(campaigns, tabName, label) {
-  const sheet = SpreadsheetApp.openById(CLG_PERF_SHEET_ID).getSheetByName(tabName);
-  const data = sheet.getDataRange().getValues();
-  const existingNames = {};
-  for (let i = 1; i < data.length; i++) existingNames[data[i][1]] = true;
-  const newOnes = campaigns.filter(function (c) { return !existingNames[c.campaignName]; });
-  Logger.log(label + ': ' + campaigns.length + ' campaigns found across scanned reports, ' + newOnes.length + ' are new.');
-  if (newOnes.length === 0) return;
-  const rows = newOnes.map(function (g) {
-    return [
-      '', g.campaignName, g.campaignType || '', g.sender || '', g.sentDate,
-      g.sent, g.delivered,
-      g.sent ? Math.round((g.delivered / g.sent) * 10000) / 100 : '',
-      '', g.uniqueOpened,
-      g.delivered ? Math.round((g.uniqueOpened / g.delivered) * 10000) / 100 : '',
-      '', g.uniqueClicked,
-      g.delivered ? Math.round((g.uniqueClicked / g.delivered) * 10000) / 100 : '',
-      '', '', '', '',
-    ];
-  });
-  appendNewRows_(tabName, rows, label);
+  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
   Logger.log(label + ': appended ' + newOnes.map(function (g) { return g.campaignName; }).join(', '));
 }
 
@@ -277,24 +271,17 @@ function processWhatsapp_(campaigns, tabName, label) {
  * the daily trigger via runOneTimeSetup().
  */
 function runSync() {
-  Logger.log('=== EMAIL (fetch once, feeds both Owned + Paid) ===');
-  const emailCsvs = fetchMatchingReportCsvs_('Campaign_Multi_Email_Summary', MAX_EMAILS_TO_SCAN);
+  Logger.log('=== EMAIL ===');
+  const emailCsvs = fetchMatchingReportCsvs_('Campaign_Multi_Email_Summary', MAX_REPORTS_TO_SCAN);
   Logger.log('Matching email reports scanned: ' + emailCsvs.length);
+  const emailCampaigns = aggregateCampaigns_(emailCsvs);
+  appendCampaigns_(emailCampaigns, EMAIL_TAB_NAME, 'email', 'Email');
 
-  Logger.log('--- Owned Media (Tanvi only) ---');
-  const tanviEmail = aggregateEmail_(emailCsvs, function (name, sender) { return sender.indexOf(TANVI_EMAIL_NAME) !== -1; });
-  processEmail_(tanviEmail, 'Email Campaigns', 'Email (Owned)');
-
-  Logger.log('--- Paid Media (everyone else, CLG-tagged only) ---');
-  const paidEmail = aggregateEmail_(emailCsvs, function (name, sender) { return sender.indexOf(TANVI_EMAIL_NAME) === -1 && isClg_(name); });
-  processEmail_(paidEmail, 'Email Campaigns - Paid Media', 'Email (Paid)');
-
-  Logger.log('=== WHATSAPP (Smartech) - Paid Media only ===');
-  Logger.log("(Tanvi's WhatsApp runs through CPaaS, not Smartech, and is filled by manual paste - see clg-owned-media.js)");
-  const waCsvs = fetchMatchingReportCsvs_('Campaign_Multi_Whatsapp_Summary', MAX_EMAILS_TO_SCAN);
+  Logger.log('=== WHATSAPP ===');
+  const waCsvs = fetchMatchingReportCsvs_('Campaign_Multi_Whatsapp_Summary', MAX_REPORTS_TO_SCAN);
   Logger.log('Matching whatsapp reports scanned: ' + waCsvs.length);
-  const paidWhatsapp = aggregateWhatsapp_(waCsvs, function (name, sender) { return sender !== TANVI_WHATSAPP_SENDER; });
-  processWhatsapp_(paidWhatsapp, 'Whatsapp campaign - Paid Media', 'WhatsApp (Paid)');
+  const waCampaigns = aggregateCampaigns_(waCsvs);
+  appendCampaigns_(waCampaigns, WHATSAPP_TAB_NAME, 'whatsapp', 'Whatsapp');
 
   Logger.log('=== Done ===');
 }
@@ -303,6 +290,11 @@ function runSync() {
  * Run this ONCE (from the function dropdown) to schedule runSync() to run
  * automatically every night. Safe to run again later — clears any existing trigger
  * for runSync first, so it never creates duplicates.
+ *
+ * atHour() fires at that hour in the SCRIPT PROJECT's own time zone, not UTC and not
+ * necessarily your account's time zone -- check/set it under the gear icon ("Project
+ * Settings") on the left sidebar before relying on this. The report emails land
+ * around 1:15 AM (per the Gmail timestamps), so 2 AM leaves a safety margin.
  */
 function runOneTimeSetup() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
@@ -311,7 +303,7 @@ function runOneTimeSetup() {
   ScriptApp.newTrigger('runSync')
     .timeBased()
     .everyDays(1)
-    .atHour(21) // ~21:00 UTC, matching the old GitHub Actions schedule (20:30 UTC)
+    .atHour(2) // 2 AM in the project's time zone -- see note above
     .create();
   Logger.log('Daily trigger created for runSync().');
 }
