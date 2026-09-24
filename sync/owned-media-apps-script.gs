@@ -38,7 +38,6 @@
 const CLG_SHEET_ID = '15zOa2W1SZwPRAbrKzqD6RDcGA9oW8CXomhkIHLwlqew';
 const EMAIL_TAB_NAME = 'Email';
 const WHATSAPP_TAB_NAME = 'Whatsapp';
-const MAX_REPORTS_TO_SCAN = 10;
 // Smartech's report file server rejects requests with no/default User-Agent (403).
 const FETCH_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' };
 
@@ -75,28 +74,42 @@ function stripBom_(text) {
   return text.replace(/^﻿/, '');
 }
 
-// ---- Gmail: find matching Smartech report emails, get the CSV out of them ----
-// Filtering by subject IN THE SEARCH ITSELF (not after fetching each message) is what
-// keeps this cheap.
-function fetchMatchingReportCsvs_(subjectContains, maxCount) {
-  const query = '(from:admin@netcorecloud.com OR from:admin@netcore.ai) subject:"' + subjectContains + '"';
-  const threads = GmailApp.search(query, 0, 40);
-  const csvs = [];
-  for (let t = 0; t < threads.length && csvs.length < maxCount; t++) {
+// ---- Gmail: find the LATEST matching Smartech report email, get the CSV out of it ----
+// Only ever the single newest match, not every historical report still sitting in the
+// inbox -- these are daily "T-1" snapshots, so re-scanning old ones every run would
+// just waste a Gmail search + a zip download per run for reports that are already
+// fully synced (the Campaign Id dedup in appendReportToSheet_ would still stop them
+// from becoming duplicate ROWS, but there's no reason to even fetch them).
+//
+// The query anchors on "Scheduled Daily Report:" (a plain, underscore-free phrase that
+// both real subjects share verbatim) rather than the underscore-heavy report name --
+// Gmail's search tokenizer can split on underscores in ways that make a quoted phrase
+// like "Campaign_Multi_Email_Summary" NOT match a subject that visibly contains that
+// exact text (this was very likely why the first version scanned 0 reports despite
+// the emails clearly being there). The precise Email-vs-WhatsApp match still happens
+// in code via subjectContains, same as before, just as the ONLY filter now rather than
+// a redundant second one.
+function fetchLatestReportCsv_(subjectContains) {
+  const query = '(from:admin@netcorecloud.com OR from:admin@netcore.ai) "Scheduled Daily Report"';
+  const threads = GmailApp.search(query, 0, 20);
+  let latestMsg = null;
+  let latestDate = null;
+  for (let t = 0; t < threads.length; t++) {
     const messages = threads[t].getMessages();
-    for (let m = 0; m < messages.length && csvs.length < maxCount; m++) {
+    for (let m = 0; m < messages.length; m++) {
       const msg = messages[m];
       const subject = msg.getSubject() || '';
-      if (subject.indexOf(subjectContains) === -1) continue; // safety net; the query above already filters
-
-      // Confirmed live: both reports are the "click to download" link form, not a
-      // direct attachment -- extractCsvFromAttachment_ is checked first anyway in
-      // case that ever changes, but is a no-op today.
-      const csvText = extractCsvFromAttachment_(msg) || extractCsvFromLink_(msg);
-      if (csvText) csvs.push(csvText);
+      if (subject.indexOf(subjectContains) === -1) continue;
+      const date = msg.getDate();
+      if (!latestDate || date > latestDate) { latestDate = date; latestMsg = msg; }
     }
   }
-  return csvs;
+  if (!latestMsg) return null;
+  Logger.log('Using report dated ' + latestDate + ': "' + latestMsg.getSubject() + '"');
+  // Confirmed live: both reports are the "click to download" link form, not a direct
+  // attachment -- extractCsvFromAttachment_ is checked first anyway in case that ever
+  // changes, but is a no-op today.
+  return extractCsvFromAttachment_(latestMsg) || extractCsvFromLink_(latestMsg);
 }
 
 function extractCsvFromAttachment_(msg) {
@@ -187,14 +200,14 @@ function appendReportToSheet_(csvText, tabName, label) {
  */
 function runSync() {
   Logger.log('=== EMAIL ===');
-  const emailCsvs = fetchMatchingReportCsvs_('Campaign_Multi_Email_Summary', MAX_REPORTS_TO_SCAN);
-  Logger.log('Matching email reports scanned: ' + emailCsvs.length);
-  emailCsvs.forEach(function (csv) { appendReportToSheet_(csv, EMAIL_TAB_NAME, 'Email'); });
+  const emailCsv = fetchLatestReportCsv_('Campaign_Multi_Email_Summary');
+  if (emailCsv) appendReportToSheet_(emailCsv, EMAIL_TAB_NAME, 'Email');
+  else Logger.log('Email: no matching report email found.');
 
   Logger.log('=== WHATSAPP ===');
-  const waCsvs = fetchMatchingReportCsvs_('Campaign_Multi_Whatsapp_Summary', MAX_REPORTS_TO_SCAN);
-  Logger.log('Matching whatsapp reports scanned: ' + waCsvs.length);
-  waCsvs.forEach(function (csv) { appendReportToSheet_(csv, WHATSAPP_TAB_NAME, 'Whatsapp'); });
+  const waCsv = fetchLatestReportCsv_('Campaign_Multi_Whatsapp_Summary');
+  if (waCsv) appendReportToSheet_(waCsv, WHATSAPP_TAB_NAME, 'Whatsapp');
+  else Logger.log('Whatsapp: no matching report email found.');
 
   Logger.log('=== Done ===');
 }
@@ -219,4 +232,14 @@ function runOneTimeSetup() {
     .atHour(2) // 2 AM in the project's time zone -- see note above
     .create();
   Logger.log('Daily trigger created for runSync().');
+}
+
+/**
+ * Diagnostic only -- run this manually if runSync ever reports "no matching report
+ * email found" again, to rule out the single most likely cause: this script running
+ * under a different Google account than the one that actually receives the Smartech
+ * emails (GmailApp.search only ever searches the account that authorized the script).
+ */
+function whoAmI() {
+  Logger.log('Running as: ' + Session.getActiveUser().getEmail());
 }
