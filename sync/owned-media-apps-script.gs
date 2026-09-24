@@ -4,28 +4,37 @@
  * Two Smartech report emails land daily in antony.jefrin@netcore.ai from
  * admin@netcorecloud.com: one "Campaign_Multi_Email_Summary_Daily_T-1_<date>", one
  * "Campaign_Multi_Whatsapp_Summary_Daily_T-1_<date>" -- each with a
- * reports.netcoresmartech.com/jobs/....zip download link in the body (confirmed live).
- * This script downloads each, unzips the CSV inside, and appends every new campaign
- * row straight into the SAME dashboard sheet the rest of this project reads from --
- * the 'Email' and 'Whatsapp' tabs, no separate Owned/Paid split (confirmed live: those
- * tabs hold every campaign, ecom and non-ecom alike -- api/clg-spends.js does its own
+ * reports.netcoresmartech.com/jobs/....zip download link in the body. This script
+ * downloads each, unzips the CSV inside, and appends every new campaign row straight
+ * into the SAME dashboard sheet the rest of this project reads from -- the 'Email'
+ * and 'Whatsapp' tabs, no separate Owned/Paid split (confirmed live: those tabs hold
+ * every campaign, ecom and non-ecom alike -- api/clg-spends.js does its own
  * Ecomm/region filtering by Campaign Name when it READS these tabs, so this script's
  * only job is to get every row in accurately, not to pre-filter anything).
  *
- * api/clg-spends.js reads exactly 8 columns from these tabs by NAME (not position):
- * Campaign Name, Sent Date, Sent, Delivered, Total Opened/Read, Unique Opened,
- * Total Clicked, Unique Clicked -- getting those 8 right is what actually matters for
- * the live Spends tab; every other column in the sheet (Campaign Id, Channel, Status,
- * Delivered %, ...) is presentational and filled on a best-effort basis below.
+ * Confirmed against a real downloaded whatsapp.csv: Smartech's own CSV columns are
+ * (Campaign Id, Campaign Name, Channel, Status, Campaign Type, Message Type, Sender,
+ * Sent Date, Published, Sent, Delivered, Delivered %, Total Opened/Read, Unique
+ * Opened, Unique Opened %, Total Clicked, Unique Clicked, Unique Clicked %,
+ * Conversions, Conversion %, Unique Conversions, Revenue, Not Sent, Not Sent %,
+ * Undelivered, Undelivered %, Tags, List Names, List IDs, Segment Names, Segment IDs)
+ * -- an (almost) exact match for the sheet's own column names, and the Email report
+ * follows the same structure. So this is a straight per-row copy matched by column
+ * NAME (handles either side having columns the other doesn't, and survives a column
+ * being reordered), NOT a sum/aggregate across rows -- each CSV row is already one
+ * specific campaign, not a split-test variant that needs combining with others.
+ *
+ * Dedup is by Campaign Id (Smartech's own id, e.g. 906) rather than Campaign Name --
+ * a real, stable, unique key already present in both the CSV and the sheet, unlike
+ * name which is at least theoretically reusable.
  *
  * Runs entirely under the Google account that authorizes this script (no exportable
  * refresh token, no external OAuth client, nothing for Google to revoke the way the
  * interim GMAIL_REFRESH_TOKEN kept getting revoked).
  */
 
-// This is the real, shared dashboard sheet -- same CLG_SHEET_ID the Vercel API
-// (api/clg-regions.js / api/clg-spends.js) reads, confirmed against
-// https://docs.google.com/spreadsheets/d/15zOa2W1SZwPRAbrKzqD6RDcGA9oW8CXomhkIHLwlqew
+// The real, shared dashboard sheet -- same CLG_SHEET_ID the Vercel API
+// (api/clg-regions.js / api/clg-spends.js) reads.
 const CLG_SHEET_ID = '15zOa2W1SZwPRAbrKzqD6RDcGA9oW8CXomhkIHLwlqew';
 const EMAIL_TAB_NAME = 'Email';
 const WHATSAPP_TAB_NAME = 'Whatsapp';
@@ -56,23 +65,12 @@ function parseCsv_(text) {
   if (field !== '' || row.length > 0) { row.push(field); rows.push(row); }
   return rows;
 }
-// Tries each candidate header name in order (case/whitespace-insensitive) and returns
-// the first column index that exists -- Smartech's exact field naming for a couple of
-// these (Total Opened / Total Clicked, Campaign Id) hasn't been confirmed against a
-// real downloaded CSV yet, so this tries the likely variants instead of assuming one.
-// runSync() logs the real header row on every run specifically so a wrong guess here
-// is visible immediately in the execution log rather than silently leaving a column
-// blank forever.
-function findColAny_(headers, candidates) {
-  for (let i = 0; i < candidates.length; i++) {
-    const idx = headers.findIndex(function (h) { return (h || '').toString().trim().toLowerCase() === candidates[i].toLowerCase(); });
-    if (idx !== -1) return idx;
-  }
-  return -1;
+function findCol_(headers, name) {
+  return headers.findIndex(function (h) { return (h || '').toString().trim().toLowerCase() === name.toLowerCase(); });
 }
 // Smartech's CSV export can carry a leading UTF-8 BOM -- left uncaught, it would
-// silently corrupt EVERY row: the BOM lands on the first header cell, so header
-// matching stops working for that one column with no error thrown anywhere.
+// silently break matching the FIRST header cell (e.g. "Campaign Id" would compare as
+// "﻿Campaign Id" and never match), with no error thrown anywhere.
 function stripBom_(text) {
   return text.replace(/^﻿/, '');
 }
@@ -137,133 +135,50 @@ function extractCsvFromLink_(msg) {
   return stripBom_(csvFile.getDataAsString('UTF-8'));
 }
 
-// ---- Aggregation -- groups split-test rows by Campaign Name (a campaign run as an
-// A/B test appears as multiple rows in Smartech's export, one per variant); summed
-// into one row per campaign name. Across multiple reports scanned in one run, only
-// the FIRST occurrence of a name is kept (a campaign shouldn't be double-counted if
-// it happens to show up in more than one scanned report). No Ecomm/region filtering
-// here -- that happens when the dashboard READS this sheet, not when writing to it,
-// so every campaign (BFSI, webinars, whatever) gets appended, matching what's already
-// in the sheet today. ----
-function aggregateCampaigns_(csvs) {
-  const groups = {};
-  csvs.forEach(function (csvText) {
-    const rows = parseCsv_(csvText);
-    if (rows.length < 2) return;
-    const headers = rows[0];
-    Logger.log('CSV headers seen: ' + headers.join(' | '));
-    const cols = {
-      campaignId: findColAny_(headers, ['Campaign ID', 'Campaign Id', 'CampaignId']),
-      campaignName: findColAny_(headers, ['Campaign Name']),
-      campaignType: findColAny_(headers, ['Campaign Type']),
-      messageType: findColAny_(headers, ['Message Type']),
-      sender: findColAny_(headers, ['Sender']),
-      sentDate: findColAny_(headers, ['Sent Date']),
-      sent: findColAny_(headers, ['Sent']),
-      delivered: findColAny_(headers, ['Delivered']),
-      totalOpened: findColAny_(headers, ['Total Opened', 'Total Read', 'Total Opened/Read']),
-      uniqueOpened: findColAny_(headers, ['Unique Opened']),
-      totalClicked: findColAny_(headers, ['Total Clicked']),
-      uniqueClicked: findColAny_(headers, ['Unique Clicked']),
-      subject: findColAny_(headers, ['Subject line or Title', 'Subject']),
-    };
+// ---- Sheet write: copies each CSV data row into the target tab, column-name-matched
+// against whichever header the CSV and the sheet each actually have, deduped against
+// what's already in the sheet by Campaign Id. ----
+function appendReportToSheet_(csvText, tabName, label) {
+  const rows = parseCsv_(csvText);
+  if (rows.length < 2) { Logger.log(label + ': CSV had no data rows.'); return; }
+  const csvHeaders = rows[0];
+  Logger.log(label + ' CSV headers: ' + csvHeaders.join(' | '));
 
-    const perReport = {};
-    for (let i = 1; i < rows.length; i++) {
-      const r = rows[i];
-      const name = cols.campaignName !== -1 ? r[cols.campaignName] : '';
-      if (!name) continue;
-      if (!perReport[name]) {
-        perReport[name] = {
-          campaignId: cols.campaignId !== -1 ? r[cols.campaignId] : '',
-          campaignName: name,
-          campaignType: cols.campaignType !== -1 ? r[cols.campaignType] : '',
-          messageType: cols.messageType !== -1 ? r[cols.messageType] : '',
-          sender: cols.sender !== -1 ? r[cols.sender] : '',
-          sentDate: cols.sentDate !== -1 ? r[cols.sentDate] : '',
-          subject: cols.subject !== -1 ? r[cols.subject] : '',
-          sent: 0, delivered: 0, totalOpened: 0, uniqueOpened: 0, totalClicked: 0, uniqueClicked: 0,
-        };
-      }
-      const g = perReport[name];
-      if (cols.sentDate !== -1 && r[cols.sentDate] < g.sentDate) g.sentDate = r[cols.sentDate];
-      if (cols.sent !== -1) g.sent += Number(r[cols.sent]) || 0;
-      if (cols.delivered !== -1) g.delivered += Number(r[cols.delivered]) || 0;
-      if (cols.totalOpened !== -1) g.totalOpened += Number(r[cols.totalOpened]) || 0;
-      if (cols.uniqueOpened !== -1) g.uniqueOpened += Number(r[cols.uniqueOpened]) || 0;
-      if (cols.totalClicked !== -1) g.totalClicked += Number(r[cols.totalClicked]) || 0;
-      if (cols.uniqueClicked !== -1) g.uniqueClicked += Number(r[cols.uniqueClicked]) || 0;
-    }
-    Object.keys(perReport).forEach(function (name) {
-      if (!groups[name]) groups[name] = perReport[name];
-    });
-  });
-  return Object.keys(groups).map(function (k) { return groups[k]; });
-}
+  const csvIdCol = findCol_(csvHeaders, 'Campaign Id');
+  if (csvIdCol === -1) { Logger.log(label + ': ERROR -- CSV has no "Campaign Id" column, aborting.'); return; }
 
-// Builds one sheet row per aggregated campaign, matching whatever the target tab's
-// OWN header row actually is (by name, not a hardcoded position) -- so this works
-// against 'Email' and 'Whatsapp' even though they don't have identical column sets,
-// and keeps working if a column ever gets reordered/added/removed in the sheet
-// itself. Any header the sheet has that isn't one of these known fields is just left
-// blank for the new row rather than guessed at.
-function buildFieldMap_(g, channelLabel) {
-  const deliveredPct = g.sent ? Math.round((g.delivered / g.sent) * 10000) / 100 : '';
-  const uniqueOpenedPct = g.delivered ? Math.round((g.uniqueOpened / g.delivered) * 10000) / 100 : '';
-  const uniqueClickedPct = g.delivered ? Math.round((g.uniqueClicked / g.delivered) * 10000) / 100 : '';
-  return {
-    'campaign id': g.campaignId || '',
-    'campaign name': g.campaignName,
-    'channel': channelLabel,
-    'status': 'Sent',
-    'campaign type': g.campaignType || '',
-    'message type': g.messageType || '',
-    'sender': g.sender || '',
-    'sent date': g.sentDate,
-    'published': g.sent,
-    'sent': g.sent,
-    'delivered': g.delivered,
-    'delivered %': deliveredPct,
-    'total opened/read': g.totalOpened || '',
-    'total opened': g.totalOpened || '',
-    'total read': g.totalOpened || '',
-    'unique opened': g.uniqueOpened,
-    'unique opened %': uniqueOpenedPct,
-    'total clicked': g.totalClicked || '',
-    'unique clicked': g.uniqueClicked,
-    'unique clicked %': uniqueClickedPct,
-    'subject line or title': g.subject || '',
-  };
-}
-
-function appendCampaigns_(campaigns, tabName, channelLabel, label) {
   const sheet = SpreadsheetApp.openById(CLG_SHEET_ID).getSheetByName(tabName);
   if (!sheet) { Logger.log(label + ': ERROR -- no tab named "' + tabName + '" found in the sheet.'); return; }
-
-  const lastCol = sheet.getLastColumn();
-  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  const nameColIdx = headers.findIndex(function (h) { return (h || '').toString().trim().toLowerCase() === 'campaign name'; });
-  if (nameColIdx === -1) { Logger.log(label + ': ERROR -- "' + tabName + '" has no "Campaign Name" column.'); return; }
+  const sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const sheetIdCol = findCol_(sheetHeaders, 'Campaign Id');
+  if (sheetIdCol === -1) { Logger.log(label + ': ERROR -- "' + tabName + '" has no "Campaign Id" column.'); return; }
 
   const lastRow = sheet.getLastRow();
-  const existingNames = {};
+  const existingIds = {};
   if (lastRow > 1) {
-    sheet.getRange(2, nameColIdx + 1, lastRow - 1, 1).getValues().forEach(function (r) { existingNames[r[0]] = true; });
+    sheet.getRange(2, sheetIdCol + 1, lastRow - 1, 1).getValues().forEach(function (r) { existingIds[r[0]] = true; });
   }
 
-  const newOnes = campaigns.filter(function (c) { return !existingNames[c.campaignName]; });
-  Logger.log(label + ': ' + campaigns.length + ' campaigns found across scanned reports, ' + newOnes.length + ' are new.');
-  if (newOnes.length === 0) return;
+  // Maps each sheet column to the matching CSV column index once, up front, instead
+  // of re-searching per row.
+  const sheetColToCsvCol = sheetHeaders.map(function (h) { return findCol_(csvHeaders, (h || '').toString().trim()); });
 
-  const rows = newOnes.map(function (g) {
-    const fieldMap = buildFieldMap_(g, channelLabel);
-    return headers.map(function (h) {
-      const key = (h || '').toString().trim().toLowerCase();
-      return Object.prototype.hasOwnProperty.call(fieldMap, key) ? fieldMap[key] : '';
-    });
-  });
-  sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
-  Logger.log(label + ': appended ' + newOnes.map(function (g) { return g.campaignName; }).join(', '));
+  const newRows = [];
+  const newNames = [];
+  for (let i = 1; i < rows.length; i++) {
+    const csvRow = rows[i];
+    const id = csvRow[csvIdCol];
+    if (!id || existingIds[id]) continue;
+    existingIds[id] = true; // guards against the same id appearing twice in one CSV
+    newRows.push(sheetColToCsvCol.map(function (csvCol) { return csvCol === -1 ? '' : csvRow[csvCol]; }));
+    const nameCol = findCol_(csvHeaders, 'Campaign Name');
+    newNames.push(nameCol !== -1 ? csvRow[nameCol] : id);
+  }
+
+  Logger.log(label + ': ' + (rows.length - 1) + ' campaigns in report, ' + newRows.length + ' are new.');
+  if (newRows.length === 0) return;
+  sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, sheetHeaders.length).setValues(newRows);
+  Logger.log(label + ': appended ' + newNames.join(', '));
 }
 
 /**
@@ -274,14 +189,12 @@ function runSync() {
   Logger.log('=== EMAIL ===');
   const emailCsvs = fetchMatchingReportCsvs_('Campaign_Multi_Email_Summary', MAX_REPORTS_TO_SCAN);
   Logger.log('Matching email reports scanned: ' + emailCsvs.length);
-  const emailCampaigns = aggregateCampaigns_(emailCsvs);
-  appendCampaigns_(emailCampaigns, EMAIL_TAB_NAME, 'email', 'Email');
+  emailCsvs.forEach(function (csv) { appendReportToSheet_(csv, EMAIL_TAB_NAME, 'Email'); });
 
   Logger.log('=== WHATSAPP ===');
   const waCsvs = fetchMatchingReportCsvs_('Campaign_Multi_Whatsapp_Summary', MAX_REPORTS_TO_SCAN);
   Logger.log('Matching whatsapp reports scanned: ' + waCsvs.length);
-  const waCampaigns = aggregateCampaigns_(waCsvs);
-  appendCampaigns_(waCampaigns, WHATSAPP_TAB_NAME, 'whatsapp', 'Whatsapp');
+  waCsvs.forEach(function (csv) { appendReportToSheet_(csv, WHATSAPP_TAB_NAME, 'Whatsapp'); });
 
   Logger.log('=== Done ===');
 }
