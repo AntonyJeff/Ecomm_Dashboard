@@ -175,6 +175,15 @@ function appendReportToSheet_(csvText, tabName, label) {
   // Maps each sheet column to the matching CSV column index once, up front, instead
   // of re-searching per row.
   const sheetColToCsvCol = sheetHeaders.map(function (h) { return findCol_(csvHeaders, (h || '').toString().trim()); });
+  // Every other column here is copied through as plain text/numbers, which is fine --
+  // but the existing rows' "Sent Date" is a real Sheets date/time value (the old sync
+  // process parsed it before writing), not text. Copying Smartech's raw date STRING
+  // through unchanged would store it as literal text instead, which not only displays
+  // differently from the existing rows but risks the dashboard's date-range filtering
+  // silently skipping it. Parsing it into an actual Date here makes Apps Script write
+  // it as a proper date/time value, same as every other row, regardless of which exact
+  // string format Smartech happens to use for a given report.
+  const sentDateSheetCol = findCol_(sheetHeaders, 'Sent Date');
 
   const newRows = [];
   const newNames = [];
@@ -183,7 +192,16 @@ function appendReportToSheet_(csvText, tabName, label) {
     const id = csvRow[csvIdCol];
     if (!id || existingIds[id]) continue;
     existingIds[id] = true; // guards against the same id appearing twice in one CSV
-    newRows.push(sheetColToCsvCol.map(function (csvCol) { return csvCol === -1 ? '' : csvRow[csvCol]; }));
+    const newRow = sheetColToCsvCol.map(function (csvCol) { return csvCol === -1 ? '' : csvRow[csvCol]; });
+    if (sentDateSheetCol !== -1 && newRow[sentDateSheetCol]) {
+      const parsed = new Date(newRow[sentDateSheetCol]);
+      if (!isNaN(parsed.getTime())) {
+        newRow[sentDateSheetCol] = parsed;
+      } else {
+        Logger.log(label + ': WARNING -- could not parse Sent Date "' + newRow[sentDateSheetCol] + '" for campaign ' + id + ', left as text.');
+      }
+    }
+    newRows.push(newRow);
     const nameCol = findCol_(csvHeaders, 'Campaign Name');
     newNames.push(nameCol !== -1 ? csvRow[nameCol] : id);
   }
@@ -192,6 +210,41 @@ function appendReportToSheet_(csvText, tabName, label) {
   if (newRows.length === 0) return;
   sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, sheetHeaders.length).setValues(newRows);
   Logger.log(label + ': appended ' + newNames.join(', '));
+}
+
+/**
+ * One-off cleanup, run manually ONCE: fixes any "Sent Date" cell that was already
+ * written as plain text (rows appended before the Date-parsing fix above landed --
+ * e.g. two rows synced during testing) so it becomes a real date/time value like every
+ * other row. Safe to run more than once -- cells that are already a real Date are left
+ * untouched, only actual text values get converted.
+ */
+function fixTextSentDates_(tabName) {
+  const sheet = SpreadsheetApp.openById(CLG_SHEET_ID).getSheetByName(tabName);
+  if (!sheet) { Logger.log('fixTextSentDates_: no tab named "' + tabName + '".'); return; }
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const dateCol = findCol_(headers, 'Sent Date');
+  if (dateCol === -1) { Logger.log('fixTextSentDates_: "' + tabName + '" has no Sent Date column.'); return; }
+
+  const range = sheet.getRange(2, dateCol + 1, lastRow - 1, 1);
+  const values = range.getValues();
+  let fixed = 0;
+  const out = values.map(function (row) {
+    const v = row[0];
+    if (typeof v === 'string' && v) {
+      const parsed = new Date(v);
+      if (!isNaN(parsed.getTime())) { fixed++; return [parsed]; }
+    }
+    return [v];
+  });
+  range.setValues(out);
+  Logger.log('fixTextSentDates_(' + tabName + '): fixed ' + fixed + ' text date(s).');
+}
+function fixAllTextSentDates() {
+  fixTextSentDates_(EMAIL_TAB_NAME);
+  fixTextSentDates_(WHATSAPP_TAB_NAME);
 }
 
 /**
