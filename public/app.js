@@ -2219,8 +2219,24 @@ function spendsUpdateKpiTiles(kpi, prevKpi) {
   });
 }
 
+// Email/WhatsApp (Smartech) sync nightly but Smartech's own reports lag ~3 days
+// behind (confirmed live -- 2026-09-28's sync only had data through 2026-09-25), so
+// unlike LinkedIn/Meta this channel can't show "up to today." Recomputed off the
+// viewer's own clock every time this channel tab is opened, not hardcoded, so it
+// stays correct without needing a code change every few days.
+function spendsUpdateDelayNote() {
+  const note = document.getElementById('spendsDataDelayNote');
+  if (!spendsIsMessaging()) { note.classList.add('hidden'); return; }
+  const latest = new Date();
+  latest.setDate(latest.getDate() - 3);
+  const label = latest.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  note.textContent = `Note: Email/WhatsApp data is ~3 days delayed -- latest available data is through ${label}.`;
+  note.classList.remove('hidden');
+}
+
 function spendsRender() {
   if (!spendsLastData) return;
+  spendsUpdateDelayNote();
   const channelData = spendsGetChannelData(spendsLastData, spendsActiveRegion, spendsActiveChannel);
   spendsRenderRadar(channelData.kpi, channelData.campaigns.length);
   spendsRenderTable();
