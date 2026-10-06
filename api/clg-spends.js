@@ -172,6 +172,11 @@ function buildLeadsBySource(rows, startTS, endTS) {
 function emptyTotals() {
   return { spend: 0, clicks: 0, impressions: 0 };
 }
+// Per-creative only -- campaign/region/kpi totals have no single URL to carry (a
+// campaign is made of many creatives, each with its own link).
+function emptyCreativeTotals() {
+  return { spend: 0, clicks: 0, impressions: 0, url: '' };
+}
 function deriveRates(totals) {
   const ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
   const cpm = totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : 0;
@@ -181,7 +186,12 @@ function deriveRates(totals) {
 
 // Builds { India: {campaigns: Map<name, totals>, kpi: totals}, SEA: {...}, ... }
 // for one channel's raw sheet rows, already scoped to [startTS, endTS].
-function buildChannelData(rows, startTS, endTS, classifyRow) {
+// pickCreativeUrl(row, h) is channel-specific (LinkedIn's Creative Post URL vs Meta's
+// Video-URL-else-Image-URL) -- see the two call sites below. The first non-empty URL
+// seen for a given creative name wins; every row for one creative should carry the
+// same link anyway, so this is just about not overwriting a found URL with a blank
+// one from some other row.
+function buildChannelData(rows, startTS, endTS, classifyRow, pickCreativeUrl) {
   const byRegion = {
     India: { campaigns: new Map(), kpi: emptyTotals() },
     SEA: { campaigns: new Map(), kpi: emptyTotals() },
@@ -227,11 +237,15 @@ function buildChannelData(rows, startTS, endTS, classifyRow) {
     campaign.totals.clicks += clicks;
     campaign.totals.impressions += impressions;
 
-    if (!campaign.creatives.has(creativeName)) campaign.creatives.set(creativeName, emptyTotals());
+    if (!campaign.creatives.has(creativeName)) campaign.creatives.set(creativeName, emptyCreativeTotals());
     const cr = campaign.creatives.get(creativeName);
     cr.spend += spend;
     cr.clicks += clicks;
     cr.impressions += impressions;
+    if (!cr.url && pickCreativeUrl) {
+      const url = pickCreativeUrl(row, h);
+      if (url) cr.url = url;
+    }
   }
   return byRegion;
 }
@@ -417,6 +431,11 @@ export default async function handler(req, res) {
       const groupCol = findCol(h, 'Campaign group name');
       const group = (row[groupCol] || '').toString().trim();
       return LINKEDIN_GROUP_TO_REGION[group] || null;
+    }, (row, h) => {
+      // Of LinkedIn's three creative URL columns (Destination/Thumbnail/Post), only
+      // Post URL -- the actual LinkedIn post -- is what the team wants to click
+      // through to and review.
+      return (row[findCol(h, 'Creative Post URL')] || '').toString().trim();
     });
 
     const facebookByRegion = buildChannelData(facebookRows, startTS, endTS, (row, h) => {
@@ -426,6 +445,12 @@ export default async function handler(req, res) {
         if (name.includes(keyword)) return region;
       }
       return null;
+    }, (row, h) => {
+      // Video takes priority over image when a creative has both (given directly by
+      // the user); Thumbnail/Destination URL are the two columns NOT wanted here.
+      const video = (row[findCol(h, 'Video URL')] || '').toString().trim();
+      if (video) return video;
+      return (row[findCol(h, 'Image url')] || '').toString().trim();
     });
 
     const linkedin = toChannelResult(linkedinByRegion, leadsByRegion);

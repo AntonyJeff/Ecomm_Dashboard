@@ -2147,7 +2147,9 @@ function spendsRenderTable(skipRowAnim) {
       const creativeRows = expanded ? c.creatives.map(cr => `
         <tr class="spends-creative-row">
           <td class="spends-td-check"></td>
-          <td class="pin pin-quarter spends-td-name spends-td-creative" title="${escapeHtml(cr.name)}">${escapeHtml(cr.name)}</td>
+          <td class="pin pin-quarter spends-td-name spends-td-creative" title="${escapeHtml(cr.name)}${cr.url ? ' -- click to view the creative' : ''}">
+            ${cr.url ? `<a class="spends-creative-link" href="${escapeHtml(cr.url)}" target="_blank" rel="noopener">${escapeHtml(cr.name)}</a>` : escapeHtml(cr.name)}
+          </td>
           ${cols.map(col => col.isClickableCount ? spendsClickableCountCellHtml(col, cr) : `<td>${col.fmt(cr[col.key])}</td>`).join('')}
         </tr>
       `).join('') : '';

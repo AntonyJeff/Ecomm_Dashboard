@@ -1394,9 +1394,21 @@ tr.spends-creative-row .spends-td-creative {
   font-size: 12px;
   font-weight: 400;
 }
+/* A creative with a known URL (LinkedIn's Creative Post URL, Meta's Video URL else
+   Image URL) opens it in a new tab -- underlined so it reads as clickable, same
+   dotted-underline affordance used for the lead-detail popups elsewhere. */
+.spends-creative-link {
+  color: inherit;
+  text-decoration: underline dotted #4a5568;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.spends-creative-link:hover { color: #a29bfe; text-decoration-color: #a29bfe; }
 :root[data-theme="light"] tr.spends-campaign-row.has-creatives:hover td { background: rgba(108, 92, 231, 0.08); }
 :root[data-theme="light"] tr.spends-creative-row td { background: rgba(100, 116, 139, 0.05); }
 :root[data-theme="light"] tr.spends-creative-row .spends-td-creative { color: var(--text-muted, #64748b); }
+:root[data-theme="light"] .spends-creative-link { text-decoration-color: var(--muted); }
+:root[data-theme="light"] .spends-creative-link:hover { color: var(--accent); text-decoration-color: var(--accent); }
 
 /* ============================================================
    LIGHT THEME -- multi-color fintech-app look (white cards on a soft
