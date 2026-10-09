@@ -38,24 +38,14 @@ const REGIONS = [
 ];
 
 // Spends is a separate ad-spend data source (api/clg-spends.js) from the
-// Leads/Trends Salesforce sync above -- MEA has Email/WhatsApp and Meta Ads
-// spend data (added once MEA's mea_ecomm-keyword Meta campaigns launched),
-// but still no LinkedIn spend data (no MEA entry in LINKEDIN_GROUP_TO_REGION
-// -- see api/clg-spends.js), independent of whether MEA has Salesforce CRM
-// data (it now does, hence MEA being in REGIONS above).
-const SPENDS_REGIONS_WITH_MEA = REGIONS;
-const SPENDS_REGIONS_WITHOUT_MEA = REGIONS.filter(r => r.key !== 'MEA');
+// Leads/Trends Salesforce sync above -- all 4 channels (LinkedIn, Meta Ads,
+// Email, WhatsApp) now have MEA campaigns, same as every other region.
 const MESSAGING_CHANNELS = new Set(['email', 'whatsapp']);
 function spendsIsMessaging() {
   return MESSAGING_CHANNELS.has(spendsActiveChannel);
 }
-// LinkedIn is the only channel still without MEA -- every other channel
-// (Meta Ads, Email, WhatsApp) supports all 5 regions.
-function spendsRegionsForChannelKey(channel) {
-  return channel === 'linkedin' ? SPENDS_REGIONS_WITHOUT_MEA : SPENDS_REGIONS_WITH_MEA;
-}
 function spendsRegionsForChannel() {
-  return spendsRegionsForChannelKey(spendsActiveChannel);
+  return REGIONS;
 }
 
 let activeRegion = 'All';
@@ -1842,9 +1832,10 @@ function spendsResetDateRange() {
 }
 
 // ---- Region filter: a compact dropdown (replaces the old donut+legend
-// widget), rebuilt whenever the active channel changes since LinkedIn is the
-// only channel without an MEA region (see spendsRegionsForChannelKey) --
-// plus "All Regions". ----
+// widget) -- plus "All Regions". All 4 Spends channels support all 5
+// regions, so this no longer varies by active channel; kept as its own
+// render step (rather than reading REGIONS inline) in case that changes
+// again later. ----
 function spendsPopulateRegionSelect() {
   const sel = document.getElementById('regionSelectSpends');
   const options = ['All', ...spendsRegionsForChannel().map(r => r.key)];
@@ -1894,7 +1885,7 @@ const SPENDS_TOTAL_KEYS = {
 
 function spendsAggregateChannel(dataset, channel) {
   const isMsg = MESSAGING_CHANNELS.has(channel);
-  const regions = spendsRegionsForChannelKey(channel).map(r => r.key);
+  const regions = REGIONS.map(r => r.key);
   const totalKeys = SPENDS_TOTAL_KEYS[isMsg ? 'messaging' : 'paid'];
   const totals = {};
   totalKeys.forEach(k => { totals[k] = 0; });
@@ -2314,10 +2305,6 @@ document.getElementById('spendsChannelTabs').addEventListener('click', (e) => {
   spendsActiveChannel = btn.dataset.channel;
   document.querySelectorAll('#spendsChannelTabs [data-channel]').forEach(t => t.classList.toggle('active', t === btn));
   pulseScale(btn);
-  // LinkedIn is the only channel without MEA -- bounce back to India rather
-  // than showing an empty region if the user had MEA selected and switched
-  // to LinkedIn. "All Regions" stays valid either way.
-  if (spendsActiveChannel === 'linkedin' && spendsActiveRegion === 'MEA') spendsActiveRegion = 'India';
   spendsPopulateRegionSelect();
   spendsClearCampaignSearch();
   spendsClearSelection();

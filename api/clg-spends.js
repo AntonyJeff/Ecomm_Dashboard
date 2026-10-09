@@ -10,29 +10,40 @@
 // different volume are combined.
 import { google } from 'googleapis';
 
-// LinkedIn: match is on the exact, case-sensitive Campaign Group Name (given
-// directly by the user, copy-pasted from Slack -- confirmed live against the
-// sheet, all four exist verbatim).
+// LinkedIn: match is on the Campaign Group Name, case-insensitive. Verified live
+// against the sheet (2026-10-09): MEA's group exists as TWO distinct literal strings,
+// "MEA ABM Ecomm Campaigns" and "MEA ABM Ecomm Campaigns [Active]" -- not a casing
+// difference, so both are listed explicitly; this is also exactly how MEA's LinkedIn
+// spend ended up silently excluded before this fix (neither string was in this map at
+// all, not a case mismatch on an existing one). Case-insensitivity is applied on top
+// as a general safeguard against a future casing variant causing the same kind of
+// silent drop again.
 const LINKEDIN_GROUP_TO_REGION = {
-  'India ABM Ecomm Campaigns': 'India',
-  'EU ABM Ecomm Campaigns': 'EU',
-  'SEA ABM Ecomm campaigns': 'SEA',
-  'LATAM_ABM_Ecommerce_Campaigns': 'LATAM',
+  'india abm ecomm campaigns': 'India',
+  'eu abm ecomm campaigns': 'EU',
+  'sea abm ecomm campaigns': 'SEA',
+  'latam_abm_ecommerce_campaigns': 'LATAM',
+  'mea abm ecomm campaigns': 'MEA',
+  'mea abm ecomm campaigns [active]': 'MEA',
 };
 
 // Facebook has no Campaign Group Name column -- ecom campaigns are identified by a
 // substring in Campaign Name instead, matched case-insensitively (given directly by
 // the user for the mea_ecomm keyword specifically, then applied uniformly to the
 // others here too, which were case-sensitive before -- there's no reason India/SEA/
-// EU/LATAM should behave differently from MEA on this). This is the full list of
-// keywords this dashboard uses to pull in a Facebook/Meta campaign at all -- anything
-// that doesn't contain one of these five substrings is excluded entirely.
+// EU/LATAM should behave differently from MEA on this). Each region lists both the
+// "Ecomm" and hyphenated "e-commerce" spelling (same two spellings isEcommCampaign
+// below already accepts) -- "Ecommerce" with no hyphen is also covered since "Ecomm"
+// is already a literal prefix of it (confirmed live: "MEA_Ecommerce_Merch Triggers"
+// matches the plain "MEA_Ecomm" entry with no extra keyword needed). This is the full
+// list of keywords this dashboard uses to pull in a Facebook/Meta campaign at all --
+// anything that doesn't contain one of these ten substrings is excluded entirely.
 const FACEBOOK_KEYWORD_TO_REGION = [
-  ['IN_Ecomm', 'India'],
-  ['SEA_Ecomm', 'SEA'],
-  ['EU_Ecomm', 'EU'],
-  ['LATAM_Ecomm', 'LATAM'],
-  ['MEA_Ecomm', 'MEA'],
+  ['IN_Ecomm', 'India'], ['IN_e-commerce', 'India'],
+  ['SEA_Ecomm', 'SEA'], ['SEA_e-commerce', 'SEA'],
+  ['EU_Ecomm', 'EU'], ['EU_e-commerce', 'EU'],
+  ['LATAM_Ecomm', 'LATAM'], ['LATAM_e-commerce', 'LATAM'],
+  ['MEA_Ecomm', 'MEA'], ['MEA_e-commerce', 'MEA'],
 ];
 
 // Email/WhatsApp (Netcore's own messaging channels, free -- no spend) have no
@@ -203,9 +214,6 @@ function buildChannelData(rows, startTS, endTS, classifyRow, pickCreativeUrl) {
     SEA: { campaigns: new Map(), kpi: emptyTotals() },
     EU: { campaigns: new Map(), kpi: emptyTotals() },
     LATAM: { campaigns: new Map(), kpi: emptyTotals() },
-    // LinkedIn has no MEA campaigns (no MEA entry in LINKEDIN_GROUP_TO_REGION, so
-    // classifyRow below never returns 'MEA' for it) -- this stays an empty shape
-    // for LinkedIn and gets populated for Facebook/Meta via the mea_ecomm keyword.
     MEA: { campaigns: new Map(), kpi: emptyTotals() },
   };
   if (rows.length < 2) return byRegion;
@@ -439,7 +447,7 @@ export default async function handler(req, res) {
 
     const linkedinByRegion = buildChannelData(linkedinRows, startTS, endTS, (row, h) => {
       const groupCol = findCol(h, 'Campaign group name');
-      const group = (row[groupCol] || '').toString().trim();
+      const group = (row[groupCol] || '').toString().trim().toLowerCase();
       return LINKEDIN_GROUP_TO_REGION[group] || null;
     }, (row, h) => {
       // Of LinkedIn's three creative URL columns (Destination/Thumbnail/Post), only
@@ -471,11 +479,10 @@ export default async function handler(req, res) {
     const email = toMessagingChannelResult(emailByRegion, leadsByRegion);
     const whatsapp = toMessagingChannelResult(whatsappByRegion, leadsByRegion);
 
-    // LinkedIn still has no MEA campaigns (no MEA entry in
-    // LINKEDIN_GROUP_TO_REGION -- paid Ecomm hasn't launched there on that
-    // channel) and Email/Whatsapp are never queried for a region outside the
-    // 5 known ones -- either way, fall back to a clean zero-value shape
-    // rather than leaving a hole in the response.
+    // Email/Whatsapp are never queried for a region outside the 5 known ones, and any
+    // channel could in principle come back with a region genuinely missing from its
+    // sheet (no campaigns at all for it yet) -- fall back to a clean zero-value shape
+    // rather than leaving a hole in the response either way.
     const emptyPaidChannel = { kpi: deriveRates(emptyTotals()), campaigns: [] };
     const emptyMessagingChannel = { kpi: deriveMessagingRates(emptyMessagingTotals()), campaigns: [] };
 
