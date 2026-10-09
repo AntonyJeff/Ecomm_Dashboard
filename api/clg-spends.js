@@ -20,13 +20,19 @@ const LINKEDIN_GROUP_TO_REGION = {
   'LATAM_ABM_Ecommerce_Campaigns': 'LATAM',
 };
 
-// Facebook has no Campaign Group Name column -- ecom campaigns are
-// identified by a case-sensitive substring in Campaign Name instead.
+// Facebook has no Campaign Group Name column -- ecom campaigns are identified by a
+// substring in Campaign Name instead, matched case-insensitively (given directly by
+// the user for the mea_ecomm keyword specifically, then applied uniformly to the
+// others here too, which were case-sensitive before -- there's no reason India/SEA/
+// EU/LATAM should behave differently from MEA on this). This is the full list of
+// keywords this dashboard uses to pull in a Facebook/Meta campaign at all -- anything
+// that doesn't contain one of these five substrings is excluded entirely.
 const FACEBOOK_KEYWORD_TO_REGION = [
   ['IN_Ecomm', 'India'],
   ['SEA_Ecomm', 'SEA'],
   ['EU_Ecomm', 'EU'],
   ['LATAM_Ecomm', 'LATAM'],
+  ['MEA_Ecomm', 'MEA'],
 ];
 
 // Email/WhatsApp (Netcore's own messaging channels, free -- no spend) have no
@@ -36,9 +42,9 @@ const FACEBOOK_KEYWORD_TO_REGION = [
 // -- this correctly reads "IN_Ecomm_Global_NDL_Dimi_SEA_Email" as India (not
 // SEA, which only shows up later as an audience-segment name) and
 // "SEA_MEA_Ecomm_Jewel..." as SEA (its primary/first-listed region). "MEA"
-// (Middle East & Africa) only shows up on these two channels, not
-// LinkedIn/Facebook, so it's a Spends-tab-only region -- see
-// SPENDS_MESSAGING_REGIONS in app.js.
+// (Middle East & Africa) also has Facebook/Meta spend now (see
+// FACEBOOK_KEYWORD_TO_REGION above) but still no LinkedIn spend -- see
+// spendsRegionsForChannelKey in app.js.
 const MESSAGING_REGION_TOKENS = { IN: 'India', SEA: 'SEA', EU: 'EU', LATAM: 'LATAM', MEA: 'MEA' };
 function classifyMessagingRegion(name) {
   const tokens = name.split(/[^A-Za-z0-9]+/);
@@ -197,6 +203,10 @@ function buildChannelData(rows, startTS, endTS, classifyRow, pickCreativeUrl) {
     SEA: { campaigns: new Map(), kpi: emptyTotals() },
     EU: { campaigns: new Map(), kpi: emptyTotals() },
     LATAM: { campaigns: new Map(), kpi: emptyTotals() },
+    // LinkedIn has no MEA campaigns (no MEA entry in LINKEDIN_GROUP_TO_REGION, so
+    // classifyRow below never returns 'MEA' for it) -- this stays an empty shape
+    // for LinkedIn and gets populated for Facebook/Meta via the mea_ecomm keyword.
+    MEA: { campaigns: new Map(), kpi: emptyTotals() },
   };
   if (rows.length < 2) return byRegion;
 
@@ -440,9 +450,9 @@ export default async function handler(req, res) {
 
     const facebookByRegion = buildChannelData(facebookRows, startTS, endTS, (row, h) => {
       const nameCol = findCol(h, 'Campaign name');
-      const name = (row[nameCol] || '').toString();
+      const name = (row[nameCol] || '').toString().toLowerCase();
       for (const [keyword, region] of FACEBOOK_KEYWORD_TO_REGION) {
-        if (name.includes(keyword)) return region;
+        if (name.includes(keyword.toLowerCase())) return region;
       }
       return null;
     }, (row, h) => {
@@ -461,10 +471,11 @@ export default async function handler(req, res) {
     const email = toMessagingChannelResult(emailByRegion, leadsByRegion);
     const whatsapp = toMessagingChannelResult(whatsappByRegion, leadsByRegion);
 
-    // LinkedIn/Meta have no MEA campaigns (paid Ecomm hasn't launched there
-    // yet) and Email/Whatsapp are never queried for a region outside the 5
-    // known ones -- either way, fall back to a clean zero-value shape rather
-    // than leaving a hole in the response.
+    // LinkedIn still has no MEA campaigns (no MEA entry in
+    // LINKEDIN_GROUP_TO_REGION -- paid Ecomm hasn't launched there on that
+    // channel) and Email/Whatsapp are never queried for a region outside the
+    // 5 known ones -- either way, fall back to a clean zero-value shape
+    // rather than leaving a hole in the response.
     const emptyPaidChannel = { kpi: deriveRates(emptyTotals()), campaigns: [] };
     const emptyMessagingChannel = { kpi: deriveMessagingRates(emptyMessagingTotals()), campaigns: [] };
 
