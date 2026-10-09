@@ -2,22 +2,31 @@
 // The 'Linkedin' and 'Facebook' sheets are populated by an external process
 // (Two Minutes Report), NOT by our own sync script -- this endpoint only
 // reads them. Each sheet is a day-by-day breakdown per campaign; ecom
-// campaigns are identified by an exact Campaign Group Name match (LinkedIn)
-// or a Campaign Name substring match (Facebook), then rows in the selected
-// date range are grouped by Campaign Name, summing the raw metrics and
-// RE-DERIVING CTR/CPM/CPC from those sums -- averaging the per-day
-// percentages/rates directly would be mathematically wrong once days of very
-// different volume are combined.
+// campaigns are identified by a Campaign Group Name match PLUS the Campaign
+// Name itself containing Ecomm/e-commerce (LinkedIn), or just a Campaign Name
+// substring match (Facebook), then rows in the selected date range are
+// grouped by Campaign Name, summing the raw metrics and RE-DERIVING CTR/CPM/
+// CPC from those sums -- averaging the per-day percentages/rates directly
+// would be mathematically wrong once days of very different volume are
+// combined.
 import { google } from 'googleapis';
 
-// LinkedIn: match is on the Campaign Group Name, case-insensitive. Verified live
-// against the sheet (2026-10-09): MEA's group exists as TWO distinct literal strings,
-// "MEA ABM Ecomm Campaigns" and "MEA ABM Ecomm Campaigns [Active]" -- not a casing
-// difference, so both are listed explicitly; this is also exactly how MEA's LinkedIn
-// spend ended up silently excluded before this fix (neither string was in this map at
-// all, not a case mismatch on an existing one). Case-insensitivity is applied on top
-// as a general safeguard against a future casing variant causing the same kind of
-// silent drop again.
+// LinkedIn: region comes from the Campaign Group Name, matched case-insensitively.
+// Verified live against the sheet (2026-10-09): MEA's group exists as TWO distinct
+// literal strings, "MEA ABM Ecomm Campaigns" and "MEA ABM Ecomm Campaigns [Active]"
+// -- not a casing difference, so both are listed explicitly; this is also exactly how
+// MEA's LinkedIn spend ended up silently excluded before this fix (neither string was
+// in this map at all, not a case mismatch on an existing one). Case-insensitivity is
+// applied on top as a general safeguard against a future casing variant causing the
+// same kind of silent drop again.
+//
+// Being in one of these groups is NOT enough to count as an Ecomm campaign, though --
+// confirmed live that every one of these groups also holds non-Ecomm campaigns sitting
+// in the same ad group (MEA's worst: 31 campaigns total, only 4 actually named Ecomm/
+// e-commerce; EU/India/LATAM each have a handful too, SEA has none). The actual
+// inclusion rule, applied at the call site below via isEcommCampaign, additionally
+// requires the Campaign Name itself to say Ecomm/e-commerce -- same requirement
+// Facebook/Email/WhatsApp already enforce, now applied uniformly to LinkedIn too.
 const LINKEDIN_GROUP_TO_REGION = {
   'india abm ecomm campaigns': 'India',
   'eu abm ecomm campaigns': 'EU',
@@ -448,7 +457,19 @@ export default async function handler(req, res) {
     const linkedinByRegion = buildChannelData(linkedinRows, startTS, endTS, (row, h) => {
       const groupCol = findCol(h, 'Campaign group name');
       const group = (row[groupCol] || '').toString().trim().toLowerCase();
-      return LINKEDIN_GROUP_TO_REGION[group] || null;
+      const region = LINKEDIN_GROUP_TO_REGION[group];
+      if (!region) return null;
+      // Belonging to an "* ABM Ecomm Campaigns" group is NOT enough on its own --
+      // confirmed live that these groups also hold plenty of non-Ecomm campaigns
+      // (e.g. MEA's group is 31 campaigns total, only 4 actually named Ecomm/
+      // e-commerce; EU/India/LATAM each have a handful too). The team only wants
+      // ones whose own Campaign Name says Ecomm/e-commerce, same requirement
+      // Facebook/Email/WhatsApp already enforce via isEcommCampaign -- everything
+      // else in the group (a product update video, a case study, etc.) is excluded
+      // even though it's sitting in the same ad group.
+      const nameCol = findCol(h, 'Campaign name');
+      const name = (row[nameCol] || '').toString();
+      return isEcommCampaign(name) ? region : null;
     }, (row, h) => {
       // Of LinkedIn's three creative URL columns (Destination/Thumbnail/Post), only
       // Post URL -- the actual LinkedIn post -- is what the team wants to click
