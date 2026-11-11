@@ -1425,24 +1425,45 @@ a.modal-record-company:hover { text-decoration: underline; color: #cbd5e1; }
 }
 .spends-search-clear:hover { color: #e2e8f0; }
 
-/* Higher specificity than the generic ".pivot-table th/td" rule (which sets
-   white-space:normal + overflow-wrap:break-word) -- without qualifying by
-   tag too, that rule was winning the cascade and wrapping long campaign
-   names onto a second line, making rows uneven. One fixed width for every
-   row (sized to fit the longest real campaign name without wrapping) plus
-   ellipsis truncation + the existing title="" tooltip keeps every row the
-   same height and the numeric columns aligned. */
+/* Full campaign name always visible on one line, never truncated/hovered-for
+   -- leadership wants the whole name readable at a glance. table-layout:auto
+   (overriding the generic .pivot-table rule's "fixed", which would otherwise
+   force every column to a pre-set width regardless of content) lets this
+   column grow to fit its widest real name; #spendsTableWrap's horizontal
+   scroll (below) is the "make the table broader" fallback for names wide
+   enough that they'd otherwise get cramped against the numeric columns. */
+.spends-table { table-layout: auto; }
 .pivot-table th.spends-th-name, .pivot-table td.spends-td-name,
 .spends-th-name, .spends-td-name {
-  width: 340px;
-  max-width: 340px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   overflow-wrap: normal;
+  padding-right: 20px;
 }
-.spends-table th:not(.pin), .spends-table td:not(.pin) { text-align: right; }
+.spends-table th:not(.pin), .spends-table td:not(.pin) { text-align: right; white-space: nowrap; }
 .spends-td-nolead { color: #334155; }
+
+/* The name column is sticky at left:0 (via .pin-quarter) everywhere else
+   this class is reused, but the Spends table has a checkbox column before
+   it -- pin that one too, shifted to sit right after it, so scrolling
+   horizontally to reach the (now often off-screen) numeric columns doesn't
+   leave the checkbox column behind under the name column. */
+#spendsTableWrap { overflow-x: auto; }
+.spends-th-check, .spends-td-check {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: #0f1221;
+}
+.spends-table thead .spends-th-check { background: #141729; z-index: 3; }
+.spends-table .pin-quarter { left: 32px; }
+/* Opaque hover tint for the two sticky columns specifically -- the generic
+   ".pivot-table tbody tr:hover td" rule below would otherwise win the
+   cascade with its own (semi-transparent) background and let whatever's
+   scrolled underneath show through a sticky cell on hover. */
+.spends-table tbody tr:hover .spends-td-check,
+.spends-table tbody tr:hover .spends-td-name {
+  background: #1a1f35;
+}
 
 .spends-th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 .spends-th-sortable:hover { color: var(--accent, #a29bfe); }
@@ -1567,6 +1588,12 @@ tr.spends-creative-row .spends-td-creative {
 :root[data-theme="light"] .sql-table .pin-subsource,
 :root[data-theme="light"] .sql-table .pin-metric {
   border-right-color: var(--grid);
+}
+:root[data-theme="light"] .spends-th-check, :root[data-theme="light"] .spends-td-check { background: var(--surface); }
+:root[data-theme="light"] .spends-table thead .spends-th-check { background: #f6f4fd; }
+:root[data-theme="light"] .spends-table tbody tr:hover .spends-td-check,
+:root[data-theme="light"] .spends-table tbody tr:hover .spends-td-name {
+  background: #efe9fb;
 }
 :root[data-theme="light"] .empty { color: var(--muted); }
 :root[data-theme="light"] .fixed-range-note:not(:empty) { color: var(--text-2); background: #f6f4fd; }
