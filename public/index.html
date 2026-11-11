@@ -494,6 +494,12 @@
           </div>
         </div>
       </div>
+
+      <!-- WhatsApp-only: replaces the radar widget above (same slot, toggled
+           in spendsRender) with a live spend-by-region breakdown, reactive to
+           the region filter -- "All Regions" shows every region's real spend,
+           a single region zeroes out the rest. -->
+      <div class="whatsapp-region-spend hidden" id="whatsappRegionSpendPanel"></div>
     </div>
 
     <nav class="subtabs" id="spendsChannelTabs">
@@ -508,6 +514,13 @@
     <main>
       <section class="channel">
         <div class="pivot-wrap">
+          <!-- WhatsApp only -- governs both this table's Spend/Cost per
+               Click/Cost per Lead columns and the spend-by-region panel above. -->
+          <div class="spends-currency-toggle hidden" id="spendsCurrencyToggle">
+            <span class="spends-currency-label">Currency</span>
+            <button type="button" class="spends-currency-btn active" data-currency="INR">&#8377; INR</button>
+            <button type="button" class="spends-currency-btn" data-currency="USD">$ USD</button>
+          </div>
           <div class="spends-group-bar">
             <button type="button" class="spends-group-toggle" id="spendsGroupToggle">
               <span class="spends-group-arrow">&#9656;</span>

@@ -1872,15 +1872,21 @@ function spendsDeriveRatesClient(t) {
   const cpc = t.clicks > 0 ? t.spend / t.clicks : 0;
   return { ...t, ctr, cpm, cpc };
 }
+// cpcUsd/cplUsd are re-derived here (not summed) for the same "never average
+// a rate" reason ctr/cpm/cpc are -- spendApplicable is carried through as an
+// OR across whatever's being aggregated (a region is "applicable" if ANY
+// contributor to this total had a WhatsApp rate, i.e. anything but EU-only).
 function spendsDeriveMessagingRatesClient(t) {
   const deliveredPct = t.sent > 0 ? (t.delivered / t.sent) * 100 : 0;
   const uniqueOpenedPct = t.delivered > 0 ? (t.uniqueOpened / t.delivered) * 100 : 0;
   const uniqueClickedPct = t.delivered > 0 ? (t.uniqueClicked / t.delivered) * 100 : 0;
-  return { ...t, deliveredPct, uniqueOpenedPct, uniqueClickedPct };
+  const cpcUsd = t.spendApplicable && t.uniqueClicked > 0 ? t.spendUsd / t.uniqueClicked : null;
+  const cplUsd = t.spendApplicable && t.leadCount > 0 ? t.spendUsd / t.leadCount : null;
+  return { ...t, deliveredPct, uniqueOpenedPct, uniqueClickedPct, cpcUsd, cplUsd };
 }
 const SPENDS_TOTAL_KEYS = {
   paid: ['spend', 'clicks', 'impressions'],
-  messaging: ['sent', 'delivered', 'totalOpened', 'uniqueOpened', 'totalClicked', 'uniqueClicked'],
+  messaging: ['sent', 'delivered', 'totalOpened', 'uniqueOpened', 'totalClicked', 'uniqueClicked', 'spendUsd', 'leadCount'],
 };
 
 function spendsAggregateChannel(dataset, channel) {
@@ -1889,6 +1895,7 @@ function spendsAggregateChannel(dataset, channel) {
   const totalKeys = SPENDS_TOTAL_KEYS[isMsg ? 'messaging' : 'paid'];
   const totals = {};
   totalKeys.forEach(k => { totals[k] = 0; });
+  let spendApplicable = false;
   const campaigns = [];
   for (const region of regions) {
     const regionData = dataset.regions[region];
@@ -1896,7 +1903,9 @@ function spendsAggregateChannel(dataset, channel) {
     const channelData = regionData[channel];
     campaigns.push(...channelData.campaigns);
     for (const k of totalKeys) totals[k] += channelData.kpi[k] || 0;
+    if (channelData.kpi.spendApplicable) spendApplicable = true;
   }
+  totals.spendApplicable = spendApplicable;
   const kpi = isMsg ? spendsDeriveMessagingRatesClient(totals) : spendsDeriveRatesClient(totals);
   campaigns.sort((a, b) => isMsg ? b.sent - a.sent : b.spend - a.spend);
   return { kpi, campaigns };
@@ -1910,15 +1919,57 @@ function spendsComputeKpiForCampaigns(campaignsList, isMsg) {
   const totalKeys = SPENDS_TOTAL_KEYS[isMsg ? 'messaging' : 'paid'];
   const totals = {};
   totalKeys.forEach(k => { totals[k] = 0; });
-  for (const c of campaignsList) for (const k of totalKeys) totals[k] += c[k] || 0;
+  let spendApplicable = false;
+  for (const c of campaignsList) {
+    for (const k of totalKeys) totals[k] += c[k] || 0;
+    if (c.spendApplicable) spendApplicable = true;
+  }
+  totals.spendApplicable = spendApplicable;
   return isMsg ? spendsDeriveMessagingRatesClient(totals) : spendsDeriveRatesClient(totals);
 }
+
+// ---- WhatsApp-only: USD<->INR display toggle for the 3 cost columns (Spend/
+// Cost per Click/Cost per Lead) and the region-spend panel that replaces the
+// radar on this channel. Canonical values from the API are always USD
+// (spendUsd/cpcUsd/cplUsd); this just picks which currency to show, applying
+// the live rate the API returned alongside the data. ----
+let spendsWhatsappCurrency = 'INR'; // 'INR' | 'USD'
+let spendsUsdToInrRate = null;
+
+function spendsToDisplayCurrency(usdValue) {
+  if (usdValue === null || usdValue === undefined) return null;
+  if (spendsWhatsappCurrency === 'USD') return usdValue;
+  return usdValue * (spendsUsdToInrRate || 1);
+}
+function spendsApplyWhatsappCurrency(obj) {
+  return {
+    ...obj,
+    spend: obj.spendApplicable ? spendsToDisplayCurrency(obj.spendUsd) : null,
+    cpc: obj.spendApplicable ? spendsToDisplayCurrency(obj.cpcUsd) : null,
+    cpl: obj.spendApplicable ? spendsToDisplayCurrency(obj.cplUsd) : null,
+  };
+}
+function spendsFmtWhatsappCurrency(n) {
+  if (n === null || n === undefined) return '&mdash;';
+  if (spendsWhatsappCurrency === 'USD') return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return fmtCurrency(n);
+}
+
 // Resolves the channel data to render, whether that's one region's own
 // response or the "All Regions" aggregate above -- every call site that used
 // to read `dataset.regions[region][channel]` directly now goes through here.
+// WhatsApp additionally gets spend/cpc/cpl (currency-adjusted display values)
+// stamped onto its kpi + every campaign here, so every downstream consumer
+// (table rows, footer totals, sorting, the region-spend panel) just reads
+// those keys without needing to know about the currency toggle itself.
 function spendsGetChannelData(dataset, region, channel) {
   if (!dataset) return null;
-  return region === 'All' ? spendsAggregateChannel(dataset, channel) : dataset.regions[region][channel];
+  const data = region === 'All' ? spendsAggregateChannel(dataset, channel) : dataset.regions[region][channel];
+  if (channel !== 'whatsapp') return data;
+  return {
+    kpi: spendsApplyWhatsappCurrency(data.kpi),
+    campaigns: data.campaigns.map(spendsApplyWhatsappCurrency),
+  };
 }
 
 const SPENDS_RADAR_MESSAGES = [
@@ -1971,6 +2022,27 @@ const SPENDS_TABLE_COLUMNS = {
     { key: 'dlCount', recordsKey: 'dlRecords', label: 'DL', fmt: fmtInt, isClickableCount: true },
   ],
   messaging: [
+    { key: 'sent', label: 'Sent', fmt: fmtInt },
+    { key: 'delivered', label: 'Delivered', fmt: fmtInt },
+    { key: 'deliveredPct', label: 'Delivered %', fmt: v => `${fmtDec(v)}%` },
+    { key: 'totalOpened', label: 'Total Opened/Read', fmt: fmtInt },
+    { key: 'uniqueOpened', label: 'Unique Opened', fmt: fmtInt },
+    { key: 'uniqueOpenedPct', label: 'Unique Opened %', fmt: v => `${fmtDec(v)}%` },
+    { key: 'totalClicked', label: 'Total Clicked', fmt: fmtInt },
+    { key: 'uniqueClicked', label: 'Unique Clicked', fmt: fmtInt },
+    { key: 'uniqueClickedPct', label: 'Unique Clicked %', fmt: v => `${fmtDec(v)}%` },
+    { key: 'leadCount', recordsKey: 'leadRecords', label: 'Leads', fmt: fmtInt, isClickableCount: true },
+    { key: 'ndlCount', recordsKey: 'ndlRecords', label: 'NDL', fmt: fmtInt, isClickableCount: true },
+    { key: 'dlCount', recordsKey: 'dlRecords', label: 'DL', fmt: fmtInt, isClickableCount: true },
+  ],
+  // WhatsApp only -- same as messaging, plus Spend/Cost per Click/Cost per
+  // Lead up front (computed from Netcore's own per-message billing rate, see
+  // WHATSAPP_RATE_USD_PER_MESSAGE in api/clg-spends.js). A region with no rate
+  // (EU) shows "--" on these 3 columns rather than a misleading 0.
+  whatsapp: [
+    { key: 'spend', label: 'Spend', fmt: spendsFmtWhatsappCurrency },
+    { key: 'cpc', label: 'Cost / Click', fmt: spendsFmtWhatsappCurrency },
+    { key: 'cpl', label: 'Cost / Lead', fmt: spendsFmtWhatsappCurrency },
     { key: 'sent', label: 'Sent', fmt: fmtInt },
     { key: 'delivered', label: 'Delivered', fmt: fmtInt },
     { key: 'deliveredPct', label: 'Delivered %', fmt: v => `${fmtDec(v)}%` },
@@ -2074,20 +2146,23 @@ function spendsRenderTable(skipRowAnim) {
   // of an active search.
   const hasSelection = spendsSelectedCampaigns.size > 0;
   const effectiveCampaigns = hasSelection ? campaigns.filter(c => spendsSelectedCampaigns.has(c.name)) : campaigns;
-  const kpi = spendsComputeKpiForCampaigns(effectiveCampaigns, isMsg);
+  const isWhatsapp = spendsActiveChannel === 'whatsapp';
+  let kpi = spendsComputeKpiForCampaigns(effectiveCampaigns, isMsg);
+  if (isWhatsapp) kpi = spendsApplyWhatsappCurrency(kpi);
 
   const prevChannelData = spendsGetPrevChannelData();
   const prevByName = new Map((prevChannelData ? prevChannelData.campaigns : []).map(c => [c.name, c]));
   // Only render a delta at all once comparison is on for this range -- an
   // undefined prev value (vs. a real 0) tells deltaBadgeHtml to render nothing.
   const prevFor = (name, key) => prevChannelData ? ((prevByName.get(name) || { [key]: 0 })[key]) : undefined;
-  const prevKpi = prevChannelData
+  let prevKpi = prevChannelData
     ? spendsComputeKpiForCampaigns(effectiveCampaigns.map(c => prevByName.get(c.name) || {}), isMsg)
     : null;
+  if (isWhatsapp && prevKpi) prevKpi = spendsApplyWhatsappCurrency(prevKpi);
 
   spendsUpdateKpiTiles(kpi, prevKpi);
 
-  const cols = SPENDS_TABLE_COLUMNS[isMsg ? 'messaging' : 'paid'];
+  const cols = isWhatsapp ? SPENDS_TABLE_COLUMNS.whatsapp : SPENDS_TABLE_COLUMNS[isMsg ? 'messaging' : 'paid'];
 
   const sortArrow = (key) => spendsSortKey !== key ? '' : (spendsSortDir === 'asc' ? ' &#9650;' : ' &#9660;');
   document.getElementById('spendsTableHead').innerHTML = `
@@ -2115,7 +2190,10 @@ function spendsRenderTable(skipRowAnim) {
     spendsRenderTable(true);
   };
 
-  const metaHeadline = isMsg ? `${cols[0].fmt(kpi[cols[0].key])} sent` : cols[0].fmt(kpi[cols[0].key]);
+  // WhatsApp's first column is now Spend, not Sent -- the headline always
+  // means "messages sent", so it reads off the Sent count specifically, not
+  // whichever column happens to be first.
+  const metaHeadline = isMsg ? `${fmtInt(kpi.sent)} sent` : cols[0].fmt(kpi[cols[0].key]);
   document.getElementById('spendsGroupTitle').textContent = `${spendsActiveRegion} Campaigns`;
   const metaParts = [];
   if (query) metaParts.push(`${campaigns.length} of ${allCampaigns.length} campaign${allCampaigns.length === 1 ? '' : 's'} matching "${spendsSearchQuery.trim()}"`);
@@ -2234,11 +2312,60 @@ function spendsUpdateDelayNote() {
   note.classList.remove('hidden');
 }
 
+// WhatsApp only -- replaces the Live Campaign Radar with a per-region spend
+// breakdown for the current date range. "All Regions" shows every region's
+// real spend; picking one region zeroes out the rest (dimmed, reading 0) so
+// it's obvious at a glance which region's numbers are actually in view. EU
+// has no WhatsApp rate at all (see WHATSAPP_RATE_USD_PER_MESSAGE), so it
+// always reads N/A rather than a misleading 0/zero-width bar.
+function spendsRenderWhatsappSpendPanel() {
+  const panel = document.getElementById('whatsappRegionSpendPanel');
+  if (!panel || !spendsLastData) return;
+
+  const rows = REGIONS.map(({ key: region }) => {
+    const isShown = spendsActiveRegion === 'All' || spendsActiveRegion === region;
+    const regionEntry = spendsLastData.regions[region];
+    const kpi = regionEntry ? regionEntry.whatsapp.kpi : null;
+    const applicable = isShown && kpi && kpi.spendApplicable;
+    const spend = applicable ? spendsToDisplayCurrency(kpi.spendUsd) : null;
+    return { region, isShown, applicable, spend };
+  });
+  const maxSpend = Math.max(1, ...rows.map(r => r.spend || 0));
+
+  panel.innerHTML = `
+    <div class="radar-header">
+      <span class="radar-header-title">WhatsApp Spend by Region</span>
+      <span class="radar-live-text">&#9679; LIVE</span>
+    </div>
+    <div class="whatsapp-spend-rows">
+      ${rows.map(r => {
+        const widthPct = r.applicable ? Math.max(2, (r.spend / maxSpend) * 100) : 0;
+        const valueText = !r.isShown ? spendsFmtWhatsappCurrency(0)
+          : !r.applicable ? 'N/A'
+          : spendsFmtWhatsappCurrency(r.spend);
+        return `
+          <div class="whatsapp-spend-row${r.isShown ? '' : ' whatsapp-spend-row-dim'}">
+            <span class="whatsapp-spend-region">${escapeHtml(r.region)}</span>
+            <div class="whatsapp-spend-bar-track"><div class="whatsapp-spend-bar-fill" style="width:${widthPct}%"></div></div>
+            <span class="whatsapp-spend-value">${valueText}</span>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    <div class="whatsapp-spend-window">Scan window: ${spendsStartDate} &rarr; ${spendsEndDate}</div>
+  `;
+}
+
 function spendsRender() {
   if (!spendsLastData) return;
   spendsUpdateDelayNote();
+  const isWhatsapp = spendsActiveChannel === 'whatsapp';
+  document.querySelector('.radar-widget').classList.toggle('hidden', isWhatsapp);
+  document.getElementById('whatsappRegionSpendPanel').classList.toggle('hidden', !isWhatsapp);
+  document.getElementById('spendsCurrencyToggle').classList.toggle('hidden', !isWhatsapp);
   const channelData = spendsGetChannelData(spendsLastData, spendsActiveRegion, spendsActiveChannel);
-  spendsRenderRadar(channelData.kpi, channelData.campaigns.length);
+  if (isWhatsapp) spendsRenderWhatsappSpendPanel();
+  else spendsRenderRadar(channelData.kpi, channelData.campaigns.length);
   spendsRenderTable();
 }
 
@@ -2257,6 +2384,7 @@ async function spendsLoad() {
     if (!res.ok) throw new Error(data.error || 'Request failed');
 
     spendsLastData = data;
+    spendsUsdToInrRate = data.usdToInrRate || spendsUsdToInrRate;
     await spendsFetchPrevIfNeeded();
     spendsRender();
     status.textContent = '';
@@ -2308,6 +2436,14 @@ document.getElementById('spendsChannelTabs').addEventListener('click', (e) => {
   spendsPopulateRegionSelect();
   spendsClearCampaignSearch();
   spendsClearSelection();
+  spendsRender();
+});
+
+document.getElementById('spendsCurrencyToggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-currency]');
+  if (!btn || btn.classList.contains('active')) return;
+  spendsWhatsappCurrency = btn.dataset.currency;
+  document.querySelectorAll('#spendsCurrencyToggle [data-currency]').forEach(b => b.classList.toggle('active', b === btn));
   spendsRender();
 });
 

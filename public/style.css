@@ -1137,6 +1137,89 @@ a.modal-record-company:hover { text-decoration: underline; color: #cbd5e1; }
   flex-direction: column;
   gap: 10px;
 }
+/* WhatsApp's "Spend by Region" panel -- same slot/box as .radar-widget
+   (swapped in via spendsRender), listing all 5 regions with a proportional
+   bar; a region outside the current filter is dimmed and reads 0. */
+.whatsapp-region-spend {
+  flex: 1 1 280px;
+  border: 1px solid #1a1f35;
+  border-radius: 16px;
+  padding: 20px;
+  background: #0f1221;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.whatsapp-spend-rows { display: flex; flex-direction: column; gap: 12px; flex: 1; justify-content: center; }
+.whatsapp-spend-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  transition: opacity 0.2s ease;
+}
+.whatsapp-spend-row-dim { opacity: 0.35; }
+.whatsapp-spend-region {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-2);
+}
+.whatsapp-spend-bar-track {
+  height: 10px;
+  border-radius: 999px;
+  background: #1a1f35;
+  overflow: hidden;
+}
+.whatsapp-spend-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6c5ce7, #a29bfe);
+  transition: width 0.4s ease;
+}
+.whatsapp-spend-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+  text-align: right;
+  min-width: 90px;
+}
+.whatsapp-spend-window {
+  font-family: "SF Mono", "Consolas", "Menlo", monospace;
+  font-size: 11px;
+  color: #4a5568;
+}
+
+/* WhatsApp currency toggle -- above the campaign table, governs the 3 cost
+   columns there and the spend-by-region panel above, together. */
+.spends-currency-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 2px 2px;
+}
+.spends-currency-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin-right: 2px;
+}
+.spends-currency-btn {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: transparent;
+  color: var(--text-2);
+}
+.spends-currency-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 .radar-readout-sys { color: #1e3a5f; font-size: 10.5px; letter-spacing: 0.1em; }
 .radar-readout-scan { color: #6c5ce7; font-weight: 700; letter-spacing: 0.04em; font-size: 13px; }
 .radar-cursor { animation: fadeIn 0.8s ease-in-out infinite; }
@@ -1527,6 +1610,9 @@ tr.spends-creative-row .spends-td-creative {
 :root[data-theme="light"] .radar-widget { border-color: var(--border); background: var(--surface); box-shadow: var(--card-shadow); }
 :root[data-theme="light"] .radar-header-title { color: var(--text-2); }
 :root[data-theme="light"] .radar-live-text { color: #e63946; }
+:root[data-theme="light"] .whatsapp-region-spend { border-color: var(--border); background: var(--surface); box-shadow: var(--card-shadow); }
+:root[data-theme="light"] .whatsapp-spend-bar-track { background: var(--grid); }
+:root[data-theme="light"] .whatsapp-spend-window { color: var(--muted); }
 :root[data-theme="light"] .radar-ring { stroke: var(--grid); }
 :root[data-theme="light"] .radar-axis { stroke: var(--grid); }
 :root[data-theme="light"] .radar-axis-diag { stroke: var(--border); }

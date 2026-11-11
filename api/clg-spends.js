@@ -55,7 +55,49 @@ const FACEBOOK_KEYWORD_TO_REGION = [
   ['MEA_Ecomm', 'MEA'], ['MEA_e-commerce', 'MEA'],
 ];
 
-// Email/WhatsApp (Netcore's own messaging channels, free -- no spend) have no
+// WhatsApp per-message cost in USD, by region -- given directly by the user
+// (screenshot of Netcore's own Smartech WhatsApp billing rate card). India and
+// LATAM each map to a single country (India, Brazil) so that country's rate is
+// used as-is; SEA and MEA each cover several countries at different rates, so
+// the region's rate is the plain average of its countries (there's no
+// per-country breakdown of WhatsApp campaigns to do better than this). EU has
+// no rate on the card at all -- EU WhatsApp spend/cost-per-click/cost-per-lead
+// are left null (not 0) rather than guessed; see spendApplicable below. Email
+// has no cost data at all and never gets a rate map, so it stays spend-free.
+const WHATSAPP_RATE_USD_PER_MESSAGE = {
+  India: 0.0118,
+  LATAM: 0.0625, // Brazil
+  SEA: (0.0860 + 0.0842 + 0.0732 + 0.0411) / 4, // Malaysia, Philippines, Singapore, Indonesia
+  MEA: (0.0792 + 0.0576 + 0.0576 + 0.0392 + 0.0379 + 0.0341) / 6, // Kuwait, UAE, Saudi Arabia, Bahrain, South Africa, Qatar
+};
+
+// Live USD->INR rate for the WhatsApp spend toggle (default view is INR; a
+// client-side toggle shows the USD figures the rate card above is actually
+// denominated in). Cached in-memory for 30 minutes per warm lambda instance --
+// Vercel reuses warm instances across nearby requests, so this avoids hitting
+// the FX API on every page load; a cold start just refetches. Falls back to a
+// fixed rate if the FX API is unreachable, so a currency conversion never
+// breaks the whole endpoint.
+const FX_FALLBACK_USD_TO_INR = 88;
+let fxCache = { rate: null, fetchedAt: 0 };
+async function getUsdToInrRate() {
+  const now = Date.now();
+  if (fxCache.rate && (now - fxCache.fetchedAt) < 30 * 60 * 1000) return fxCache.rate;
+  try {
+    const resp = await fetch('https://open.er-api.com/v6/latest/USD');
+    const data = await resp.json();
+    const rate = data && data.rates && data.rates.INR;
+    if (typeof rate === 'number' && rate > 0) {
+      fxCache = { rate, fetchedAt: now };
+      return rate;
+    }
+  } catch (err) {
+    console.error('[clg-spends] FX rate fetch failed, using fallback', err.message);
+  }
+  return fxCache.rate || FX_FALLBACK_USD_TO_INR;
+}
+
+// Email/WhatsApp (Netcore's own messaging channels) have no
 // region column at all. Campaign names follow a `Q<n>_<REGION>[_<REGION2>]_...`
 // convention (confirmed live against both sheets), so the region is the
 // LEFTMOST underscore/space/hyphen-separated token that matches a known code
@@ -307,29 +349,40 @@ function toChannelResult(byRegion, leadsByRegion) {
   return result;
 }
 
-// Email/WhatsApp: no spend at all, so the metrics are the raw send/delivery/
-// engagement counts instead -- percentages are RE-DERIVED from summed counts
-// for the same reason CTR/CPM are above (never average per-row percentages).
-// Confirmed live against real rows: Delivered % = Delivered/Sent, while
-// Unique Opened % and Unique Clicked % are both out of Delivered (not Sent).
+// Email/WhatsApp: no spend at all (except WhatsApp's per-message rate card,
+// see WHATSAPP_RATE_USD_PER_MESSAGE above), so the metrics are the raw send/
+// delivery/engagement counts instead -- percentages are RE-DERIVED from
+// summed counts for the same reason CTR/CPM are above (never average
+// per-row percentages). Confirmed live against real rows: Delivered % =
+// Delivered/Sent, while Unique Opened % and Unique Clicked % are both out of
+// Delivered (not Sent).
+//
+// spendApplicable is true only for a region that actually has a rate (so
+// WhatsApp/India/SEA/LATAM/MEA, never EU, never Email at all) -- callers use
+// it to render "N/A" instead of a misleading $0/₹0.
 function emptyMessagingTotals() {
-  return { sent: 0, delivered: 0, totalOpened: 0, uniqueOpened: 0, totalClicked: 0, uniqueClicked: 0 };
+  return { sent: 0, delivered: 0, totalOpened: 0, uniqueOpened: 0, totalClicked: 0, uniqueClicked: 0, spendUsd: 0 };
 }
-function deriveMessagingRates(totals) {
+function deriveMessagingRates(totals, spendApplicable) {
   const deliveredPct = totals.sent > 0 ? (totals.delivered / totals.sent) * 100 : 0;
   const uniqueOpenedPct = totals.delivered > 0 ? (totals.uniqueOpened / totals.delivered) * 100 : 0;
   const uniqueClickedPct = totals.delivered > 0 ? (totals.uniqueClicked / totals.delivered) * 100 : 0;
-  return { ...totals, deliveredPct, uniqueOpenedPct, uniqueClickedPct };
+  const cpcUsd = spendApplicable && totals.uniqueClicked > 0 ? totals.spendUsd / totals.uniqueClicked : null;
+  return { ...totals, deliveredPct, uniqueOpenedPct, uniqueClickedPct, spendApplicable: !!spendApplicable, cpcUsd };
 }
 
-function buildMessagingChannelData(rows, startTS, endTS) {
-  const byRegion = {
-    India: { campaigns: new Map(), kpi: emptyMessagingTotals() },
-    SEA: { campaigns: new Map(), kpi: emptyMessagingTotals() },
-    EU: { campaigns: new Map(), kpi: emptyMessagingTotals() },
-    LATAM: { campaigns: new Map(), kpi: emptyMessagingTotals() },
-    MEA: { campaigns: new Map(), kpi: emptyMessagingTotals() },
-  };
+// rateUsdByRegion (WHATSAPP_RATE_USD_PER_MESSAGE, or undefined for Email) maps
+// region -> USD cost per message; a region missing from it (EU) gets
+// spendApplicable: false for every campaign in that region.
+function buildMessagingChannelData(rows, startTS, endTS, rateUsdByRegion) {
+  const byRegion = {};
+  for (const region of ['India', 'SEA', 'EU', 'LATAM', 'MEA']) {
+    byRegion[region] = {
+      campaigns: new Map(),
+      kpi: emptyMessagingTotals(),
+      spendApplicable: !!(rateUsdByRegion && typeof rateUsdByRegion[region] === 'number'),
+    };
+  }
   if (rows.length < 2) return byRegion;
 
   const h = rows[0];
@@ -362,12 +415,16 @@ function buildMessagingChannelData(rows, startTS, endTS) {
     const uniqueClicked = parseFloat(row[cols.uniqueClicked]) || 0;
 
     const regionData = byRegion[region];
+    const rate = rateUsdByRegion ? rateUsdByRegion[region] : undefined;
+    const spendUsd = typeof rate === 'number' ? sent * rate : 0;
+
     regionData.kpi.sent += sent;
     regionData.kpi.delivered += delivered;
     regionData.kpi.totalOpened += totalOpened;
     regionData.kpi.uniqueOpened += uniqueOpened;
     regionData.kpi.totalClicked += totalClicked;
     regionData.kpi.uniqueClicked += uniqueClicked;
+    regionData.kpi.spendUsd += spendUsd;
 
     if (!regionData.campaigns.has(campaignName)) regionData.campaigns.set(campaignName, emptyMessagingTotals());
     const c = regionData.campaigns.get(campaignName);
@@ -377,6 +434,7 @@ function buildMessagingChannelData(rows, startTS, endTS) {
     c.uniqueOpened += uniqueOpened;
     c.totalClicked += totalClicked;
     c.uniqueClicked += uniqueClicked;
+    c.spendUsd += spendUsd;
   }
   return byRegion;
 }
@@ -384,25 +442,34 @@ function buildMessagingChannelData(rows, startTS, endTS) {
 function toMessagingChannelResult(byRegion, leadsByRegion) {
   const result = {};
   for (const region of Object.keys(byRegion)) {
-    const { campaigns, kpi } = byRegion[region];
+    const { campaigns, kpi, spendApplicable } = byRegion[region];
     const leadsBySource = (leadsByRegion && leadsByRegion[region]) || new Map();
+
+    let totalLeadCount = 0;
+    const campaignList = [...campaigns.entries()]
+      .map(([name, totals]) => {
+        const leadsEntry = leadsBySource.get(normalizeSourceName(name));
+        const leadCount = leadsEntry ? leadsEntry.count : 0;
+        totalLeadCount += leadCount;
+        const cplUsd = spendApplicable && leadCount > 0 ? totals.spendUsd / leadCount : null;
+        return {
+          name,
+          ...deriveMessagingRates(totals, spendApplicable),
+          cplUsd,
+          leadCount,
+          leadRecords: leadsEntry ? leadsEntry.records : [],
+          ndlCount: leadsEntry ? leadsEntry.ndlCount : 0,
+          ndlRecords: leadsEntry ? leadsEntry.ndlRecords : [],
+          dlCount: leadsEntry ? leadsEntry.dlCount : 0,
+          dlRecords: leadsEntry ? leadsEntry.dlRecords : [],
+        };
+      })
+      .sort((a, b) => b.sent - a.sent);
+
+    const kpiCplUsd = spendApplicable && totalLeadCount > 0 ? kpi.spendUsd / totalLeadCount : null;
     result[region] = {
-      kpi: deriveMessagingRates(kpi),
-      campaigns: [...campaigns.entries()]
-        .map(([name, totals]) => {
-          const leadsEntry = leadsBySource.get(normalizeSourceName(name));
-          return {
-            name,
-            ...deriveMessagingRates(totals),
-            leadCount: leadsEntry ? leadsEntry.count : 0,
-            leadRecords: leadsEntry ? leadsEntry.records : [],
-            ndlCount: leadsEntry ? leadsEntry.ndlCount : 0,
-            ndlRecords: leadsEntry ? leadsEntry.ndlRecords : [],
-            dlCount: leadsEntry ? leadsEntry.dlCount : 0,
-            dlRecords: leadsEntry ? leadsEntry.dlRecords : [],
-          };
-        })
-        .sort((a, b) => b.sent - a.sent),
+      kpi: { ...deriveMessagingRates(kpi, spendApplicable), cplUsd: kpiCplUsd, leadCount: totalLeadCount },
+      campaigns: campaignList,
     };
   }
   return result;
@@ -496,16 +563,17 @@ export default async function handler(req, res) {
     const meta = toChannelResult(facebookByRegion, leadsByRegion);
 
     const emailByRegion = buildMessagingChannelData(emailRows, startTS, endTS);
-    const whatsappByRegion = buildMessagingChannelData(whatsappRows, startTS, endTS);
+    const whatsappByRegion = buildMessagingChannelData(whatsappRows, startTS, endTS, WHATSAPP_RATE_USD_PER_MESSAGE);
     const email = toMessagingChannelResult(emailByRegion, leadsByRegion);
     const whatsapp = toMessagingChannelResult(whatsappByRegion, leadsByRegion);
+    const usdToInrRate = await getUsdToInrRate();
 
     // Email/Whatsapp are never queried for a region outside the 5 known ones, and any
     // channel could in principle come back with a region genuinely missing from its
     // sheet (no campaigns at all for it yet) -- fall back to a clean zero-value shape
     // rather than leaving a hole in the response either way.
     const emptyPaidChannel = { kpi: deriveRates(emptyTotals()), campaigns: [] };
-    const emptyMessagingChannel = { kpi: deriveMessagingRates(emptyMessagingTotals()), campaigns: [] };
+    const emptyMessagingChannel = { kpi: { ...deriveMessagingRates(emptyMessagingTotals(), false), cplUsd: null, leadCount: 0 }, campaigns: [] };
 
     const regions = {};
     for (const region of ['India', 'SEA', 'EU', 'LATAM', 'MEA']) {
@@ -517,7 +585,7 @@ export default async function handler(req, res) {
       };
     }
 
-    res.status(200).json({ startDate, endDate, regions, lastUpdated: new Date().toISOString() });
+    res.status(200).json({ startDate, endDate, regions, usdToInrRate, lastUpdated: new Date().toISOString() });
   } catch (err) {
     console.error('[clg-spends]', err);
     res.status(500).json({ error: err.message });
