@@ -2041,8 +2041,8 @@ const SPENDS_TABLE_COLUMNS = {
   // (EU) shows "--" on these 3 columns rather than a misleading 0.
   whatsapp: [
     { key: 'spend', label: 'Spend', fmt: spendsFmtWhatsappCurrency },
-    { key: 'cpc', label: 'Cost / Click', fmt: spendsFmtWhatsappCurrency },
-    { key: 'cpl', label: 'Cost / Lead', fmt: spendsFmtWhatsappCurrency },
+    { key: 'cpc', label: 'CPC', fmt: spendsFmtWhatsappCurrency },
+    { key: 'cpl', label: 'CPL', fmt: spendsFmtWhatsappCurrency },
     { key: 'sent', label: 'Sent', fmt: fmtInt },
     { key: 'delivered', label: 'Delivered', fmt: fmtInt },
     { key: 'deliveredPct', label: 'Delivered %', fmt: v => `${fmtDec(v)}%` },
