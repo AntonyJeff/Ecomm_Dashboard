@@ -452,20 +452,27 @@ function buildMessagingChannelData(rows, startTS, endTS, rateUsdByRegion) {
   return byRegion;
 }
 
-// Smartech's "view sent content" page needs a single Campaign Id, so this is
-// only buildable when a campaign name maps to exactly one -- confirmed live
-// against the real sheet: true for ~all 'Regular' type campaigns (the only
-// type WhatsApp ever uses), but A/B/STO/Split email campaigns always share
-// one name across several ids (one per arm/timezone), so there's no single
-// page to send someone to for those; they're left without a link rather than
-// guessing which id/page is "the" right one. campaignType is hardcoded
-// 'regular' in the URL itself since this only ever fires for Regular rows.
+// Smartech's "view sent content" page needs one Campaign Id -- 'Regular'
+// campaigns always have exactly one. A/B, STO and Split campaigns share one
+// campaign name across several ids (one per arm/timezone); given 3 real
+// example links (one per type), the right one to use for those is the
+// LOWEST id of the group, with campaignType set to that type's own URL
+// param (confirmed live: 'A/B' -> split_ab, 'STO' -> sto, 'Split' -> split).
+// A campaign name is only left without a link when it mixes more than one
+// Campaign Type (1 of 738 email campaigns, confirmed live) -- genuinely
+// ambiguous which type's page to send someone to.
 const SMARTECH_CAMPAIGN_BASE_URL = 'https://pr1r.netcoresmartech.com/marcom/admin/index.php/campaign/unified/view';
-function buildSmartechUrl(campaignId, campaignName, channelParam) {
+const SMARTECH_CAMPAIGN_TYPE_PARAM = {
+  regular: 'regular',
+  'a/b': 'split_ab',
+  sto: 'sto',
+  split: 'split',
+};
+function buildSmartechUrl(campaignId, campaignName, campaignTypeParam, channelParam) {
   const params = new URLSearchParams({
     channel: channelParam,
     campaignName,
-    campaignType: 'regular',
+    campaignType: campaignTypeParam,
     oldFlag: '0',
     viewFrom: 'list',
     reachability: '1',
@@ -490,9 +497,11 @@ function toMessagingChannelResult(byRegion, leadsByRegion, channelParam) {
         const cplUsd = spendApplicable && leadCount > 0 ? totals.spendUsd / leadCount : null;
 
         const meta = campaignMeta.get(name) || { ids: new Set(), types: new Set() };
-        const isRegularOnly = meta.types.size > 0 && [...meta.types].every(t => t.toLowerCase() === 'regular');
-        const smartechUrl = (isRegularOnly && meta.ids.size === 1)
-          ? buildSmartechUrl([...meta.ids][0], name, channelParam)
+        const singleType = meta.types.size === 1 ? [...meta.types][0].toLowerCase() : null;
+        const campaignTypeParam = singleType ? SMARTECH_CAMPAIGN_TYPE_PARAM[singleType] : null;
+        const lowestId = meta.ids.size > 0 ? [...meta.ids].sort((a, b) => Number(a) - Number(b))[0] : null;
+        const smartechUrl = (campaignTypeParam && lowestId)
+          ? buildSmartechUrl(lowestId, name, campaignTypeParam, channelParam)
           : null;
 
         return {
