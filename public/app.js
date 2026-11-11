@@ -2210,12 +2210,20 @@ function spendsRenderTable(skipRowAnim) {
       const hasCreatives = Array.isArray(c.creatives) && c.creatives.length > 0;
       const expanded = hasCreatives && spendsExpandedCampaigns.has(c.name);
       const checked = spendsSelectedCampaigns.has(c.name);
+      // smartechUrl (Email/WhatsApp only, see buildSmartechUrl in
+      // api/clg-spends.js) only exists for a 'Regular'-type campaign with a
+      // single Campaign Id -- A/B/STO/Split campaigns share one name across
+      // several Campaign Ids, so there's no single page to link to and the
+      // name stays plain text for those.
+      const nameHtml = c.smartechUrl
+        ? `<a class="spends-creative-link" href="${escapeHtml(c.smartechUrl)}" target="_blank" rel="noopener">${escapeHtml(c.name)}</a>`
+        : escapeHtml(c.name);
       const campaignRow = `
         <tr class="spends-campaign-row${hasCreatives ? ' has-creatives' : ''}" data-idx="${i}">
           <td class="spends-td-check"><input type="checkbox" class="spends-campaign-checkbox" data-name="${escapeHtml(c.name)}" ${checked ? 'checked' : ''}></td>
-          <td class="pin pin-quarter spends-td-name" title="${escapeHtml(c.name)}">
+          <td class="pin pin-quarter spends-td-name" title="${escapeHtml(c.name)}${c.smartechUrl ? ' -- click to view the content sent in Smartech' : ''}">
             ${hasCreatives ? `<span class="spends-creative-arrow">${expanded ? '&#9662;' : '&#9656;'}</span>` : '<span class="spends-creative-arrow spends-creative-arrow-empty"></span>'}
-            ${escapeHtml(c.name)}
+            ${nameHtml}
           </td>
           ${cols.map(col => col.isClickableCount ? spendsClickableCountCellHtml(col, c) : `<td>${col.fmt(c[col.key])}${deltaBadgeHtml(c[col.key], prevFor(c.name, col.key))}</td>`).join('')}
         </tr>

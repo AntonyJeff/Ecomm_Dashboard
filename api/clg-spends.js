@@ -379,6 +379,10 @@ function buildMessagingChannelData(rows, startTS, endTS, rateUsdByRegion) {
   for (const region of ['India', 'SEA', 'EU', 'LATAM', 'MEA']) {
     byRegion[region] = {
       campaigns: new Map(),
+      // name -> { ids: Set<string>, types: Set<string> } across every row
+      // seen for that campaign in range -- used to decide whether a single,
+      // unambiguous Smartech link can be built for it (see buildSmartechUrl).
+      campaignMeta: new Map(),
       kpi: emptyMessagingTotals(),
       spendApplicable: !!(rateUsdByRegion && typeof rateUsdByRegion[region] === 'number'),
     };
@@ -387,7 +391,9 @@ function buildMessagingChannelData(rows, startTS, endTS, rateUsdByRegion) {
 
   const h = rows[0];
   const cols = {
+    campaignId: findCol(h, 'Campaign Id'),
     campaignName: findCol(h, 'Campaign Name'),
+    campaignType: findCol(h, 'Campaign Type'),
     date: findCol(h, 'Sent Date'),
     sent: findCol(h, 'Sent'),
     delivered: findCol(h, 'Delivered'),
@@ -418,6 +424,13 @@ function buildMessagingChannelData(rows, startTS, endTS, rateUsdByRegion) {
     const rate = rateUsdByRegion ? rateUsdByRegion[region] : undefined;
     const spendUsd = typeof rate === 'number' ? sent * rate : 0;
 
+    if (!regionData.campaignMeta.has(campaignName)) regionData.campaignMeta.set(campaignName, { ids: new Set(), types: new Set() });
+    const meta = regionData.campaignMeta.get(campaignName);
+    const campaignId = (row[cols.campaignId] || '').toString().trim();
+    const campaignType = (row[cols.campaignType] || '').toString().trim();
+    if (campaignId) meta.ids.add(campaignId);
+    if (campaignType) meta.types.add(campaignType);
+
     regionData.kpi.sent += sent;
     regionData.kpi.delivered += delivered;
     regionData.kpi.totalOpened += totalOpened;
@@ -439,10 +452,33 @@ function buildMessagingChannelData(rows, startTS, endTS, rateUsdByRegion) {
   return byRegion;
 }
 
-function toMessagingChannelResult(byRegion, leadsByRegion) {
+// Smartech's "view sent content" page needs a single Campaign Id, so this is
+// only buildable when a campaign name maps to exactly one -- confirmed live
+// against the real sheet: true for ~all 'Regular' type campaigns (the only
+// type WhatsApp ever uses), but A/B/STO/Split email campaigns always share
+// one name across several ids (one per arm/timezone), so there's no single
+// page to send someone to for those; they're left without a link rather than
+// guessing which id/page is "the" right one. campaignType is hardcoded
+// 'regular' in the URL itself since this only ever fires for Regular rows.
+const SMARTECH_CAMPAIGN_BASE_URL = 'https://pr1r.netcoresmartech.com/marcom/admin/index.php/campaign/unified/view';
+function buildSmartechUrl(campaignId, campaignName, channelParam) {
+  const params = new URLSearchParams({
+    channel: channelParam,
+    campaignName,
+    campaignType: 'regular',
+    oldFlag: '0',
+    viewFrom: 'list',
+    reachability: '1',
+    refresh_required: '0',
+    amp_integration: '',
+  });
+  return `${SMARTECH_CAMPAIGN_BASE_URL}/${campaignId}/sent?${params.toString()}`;
+}
+
+function toMessagingChannelResult(byRegion, leadsByRegion, channelParam) {
   const result = {};
   for (const region of Object.keys(byRegion)) {
-    const { campaigns, kpi, spendApplicable } = byRegion[region];
+    const { campaigns, kpi, spendApplicable, campaignMeta } = byRegion[region];
     const leadsBySource = (leadsByRegion && leadsByRegion[region]) || new Map();
 
     let totalLeadCount = 0;
@@ -452,6 +488,13 @@ function toMessagingChannelResult(byRegion, leadsByRegion) {
         const leadCount = leadsEntry ? leadsEntry.count : 0;
         totalLeadCount += leadCount;
         const cplUsd = spendApplicable && leadCount > 0 ? totals.spendUsd / leadCount : null;
+
+        const meta = campaignMeta.get(name) || { ids: new Set(), types: new Set() };
+        const isRegularOnly = meta.types.size > 0 && [...meta.types].every(t => t.toLowerCase() === 'regular');
+        const smartechUrl = (isRegularOnly && meta.ids.size === 1)
+          ? buildSmartechUrl([...meta.ids][0], name, channelParam)
+          : null;
+
         return {
           name,
           ...deriveMessagingRates(totals, spendApplicable),
@@ -462,6 +505,7 @@ function toMessagingChannelResult(byRegion, leadsByRegion) {
           ndlRecords: leadsEntry ? leadsEntry.ndlRecords : [],
           dlCount: leadsEntry ? leadsEntry.dlCount : 0,
           dlRecords: leadsEntry ? leadsEntry.dlRecords : [],
+          smartechUrl,
         };
       })
       .sort((a, b) => b.sent - a.sent);
@@ -564,8 +608,8 @@ export default async function handler(req, res) {
 
     const emailByRegion = buildMessagingChannelData(emailRows, startTS, endTS);
     const whatsappByRegion = buildMessagingChannelData(whatsappRows, startTS, endTS, WHATSAPP_RATE_USD_PER_MESSAGE);
-    const email = toMessagingChannelResult(emailByRegion, leadsByRegion);
-    const whatsapp = toMessagingChannelResult(whatsappByRegion, leadsByRegion);
+    const email = toMessagingChannelResult(emailByRegion, leadsByRegion, 'email');
+    const whatsapp = toMessagingChannelResult(whatsappByRegion, leadsByRegion, 'whatsapp');
     const usdToInrRate = await getUsdToInrRate();
 
     // Email/Whatsapp are never queried for a region outside the 5 known ones, and any
