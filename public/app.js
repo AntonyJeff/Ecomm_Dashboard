@@ -1274,6 +1274,10 @@ document.getElementById('compareQuickRangeRowLeads').addEventListener('click', (
   else leadsCompareApplyQuickRange(parseInt(btn.dataset.days, 10));
 });
 
+// Keeps the region filter consistent across the Leads <-> Spends views --
+// whichever view the user picked a region on "wins" when switching to the
+// other view, rather than Spends always reverting to its own last-selected
+// region (previously hardcoded to default back to India).
 function showSpends(show) {
   viewingSpends = show;
   const spendsEl = document.getElementById('spendsView');
@@ -1286,6 +1290,9 @@ function showSpends(show) {
   animateViewIn(show ? spendsEl : leadsEl, 18);
   smoothScrollTop();
   if (show) {
+    spendsActiveRegion = activeRegion;
+    const spendsSel = document.getElementById('regionSelectSpends');
+    if (spendsSel) spendsSel.value = spendsActiveRegion;
     spendsRenderCalendar();
     spendsLoad();
   }
@@ -1447,7 +1454,15 @@ function formatDateRangeLabel(start, end) {
 document.getElementById('regionSelectLeads').addEventListener('change', (e) => selectRegion(e.target.value));
 
 document.getElementById('spendsBox').addEventListener('click', () => showSpends(true));
-document.getElementById('spendsBackBtn').addEventListener('click', () => showSpends(false));
+document.getElementById('spendsBackBtn').addEventListener('click', () => {
+  activeRegion = spendsActiveRegion;
+  document.getElementById('regionSelectLeads').value = activeRegion;
+  showSpends(false);
+  render();
+  renderOverview();
+  renderOverviewSpends();
+  renderTalWidget();
+});
 
 document.getElementById('stageTabs').addEventListener('click', (e) => {
   const btn = e.target.closest('.subtab');
